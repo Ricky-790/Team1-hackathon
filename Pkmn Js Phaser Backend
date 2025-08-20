@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web3 Pokemon Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            z-index: 1000;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .wallet-info {
+            margin-bottom: 10px;
+        }
+        
+        .pokemon-stats {
+            background: rgba(255,255,255,0.1);
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px 0;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 5px;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div class="wallet-info">
+                <div id="walletStatus">Wallet: Not Connected</div>
+                <button id="connectWallet" onclick="connectWallet()">Connect Wallet</button>
+            </div>
+            
+            <div class="wallet-info">
+                <div>Balance: <span id="balance">0</span> ETH</div>
+                <div>Network: <span id="network">Unknown</span></div>
+            </div>
+            
+            <div class="pokemon-stats">
+                <h3>Your Pokemon Collection</h3>
+                <div id="pokemonList">No Pokemon owned</div>
+                <button onclick="mintPokemon()" id="mintBtn" disabled>Mint Random Pokemon (0.01 ETH)</button>
+            </div>
+            
+            <div class="pokemon-stats">
+                <h3>Battle Arena</h3>
+                <div>Selected Pokemon: <span id="selectedPokemon">None</span></div>
+                <button onclick="findBattle()" id="battleBtn" disabled>Find Battle</button>
+                <button onclick="executeBattle()" id="executeBtn" disabled>Execute Battle</button>
+            </div>
+        </div>
+        
+        <div id="status">Initializing game...</div>
+    </div>
+
+    <script>
+        // Smart Contract ABI (simplified for demo)
+        const CONTRACT_ABI = [
+            "function mintPokemon() external payable returns (uint256)",
+            "function getPokemon(uint256 tokenId) external view returns (string memory name, uint256 attack, uint256 defense, uint256 agility)",
+            "function getPlayerPokemon(address player) external view returns (uint256[] memory)",
+            "function battle(uint256 pokemon1, uint256 pokemon2) external returns (bool)",
+            "function totalSupply() external view returns (uint256)",
+            "event PokemonMinted(address indexed owner, uint256 indexed tokenId, string name)",
+            "event BattleResult(uint256 indexed winner, uint256 indexed loser, address indexed player)"
+        ];
+        
+        // Mock contract address (replace with actual deployed contract)
+        const CONTRACT_ADDRESS = "0x1234567890123456789012345678901234567890";
+        
+        // Game state
+        let gameState = {
+            web3Provider: null,
+            signer: null,
+            contract: null,
+            userAddress: null,
+            userPokemon: [],
+            selectedPokemon: null,
+            gameScene: null,
+            isConnected: false
+        };
+        
+        // Pokemon data structure
+        class Pokemon {
+            constructor(id, name, attack, defense, agility) {
+                this.id = id;
+                this.name = name;
+                this.attack = attack;
+                this.defense = defense;
+                this.agility = agility;
+                this.hp = 100;
+                this.maxHp = 100;
+            }
+            
+            calculatePower() {
+                return (this.attack + this.defense + this.agility) / 3;
+            }
+            
+            getStats() {
+                return {
+                    attack: this.attack,
+                    defense: this.defense,
+                    agility: this.agility,
+                    power: this.calculatePower()
+                };
+            }
+        }
+        
+        // Mock Pokemon names for demo
+        const POKEMON_NAMES = [
+            "Sparkchu", "Flamebird", "Aquatail", "Grasswing", "Rockfist",
+            "Iceclaw", "Thunderbolt", "Shadowmere", "Lightbeam", "Darkvoid"
+        ];
+        
+        // Phaser Game Configuration
+        const gameConfig = {
+            type: Phaser.AUTO,
+            width: 1000,
+            height: 600,
+            parent: 'gameContainer',
+            backgroundColor: '#2c3e50',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            }
+        };
+        
+        let game;
+        let pokemonSprites = {};
+        let battleAnimation = null;
+        
+        // Phaser Scene Functions
+        function preload() {
+            // Create simple colored rectangles as Pokemon sprites
+            this.load.image('pokemon1', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
+            
+            // Generate Pokemon sprites programmatically
+            const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+            
+            colors.forEach((color, index) => {
+                this.add.graphics()
+                    .fillStyle(parseInt(color.replace('#', '0x')))
+                    .fillRoundedRect(0, 0, 80, 80, 10)
+                    .generateTexture(`pokemon_${index}`, 80, 80);
+            });
+        }
+        
+        function create() {
+            gameState.gameScene = this;
+            
+            // Create background
+            this.add.rectangle(500, 300, 1000, 600, 0x34495e);
+            
+            // Create title
+            this.add.text(500, 50, 'Web3 Pokemon Battle Arena', {
+                fontSize: '32px',
+                fill: '#ecf0f1',
+                fontFamily: 'Arial, sans-serif'
+            }).setOrigin(0.5);
+            
+            // Initialize battle arena
+            createBattleArena.call(this);
+            
+            updateStatus('Game initialized. Connect your wallet to start!');
+        }
+        
+        function update() {
+            // Game loop updates
+            if (battleAnimation) {
+                updateBattleAnimation.call(this);
+            }
+        }
+        
+        function createBattleArena() {
+            // Create battle positions
+            this.playerPosition = { x: 250, y: 400 };
+            this.opponentPosition = { x: 750, y: 400 };
+            
+            // Add battle ground
+            this.add.rectangle(500, 500, 800, 200, 0x27ae60, 0.3);
+            this.add.text(500, 500, 'Battle Arena', {
+                fontSize: '24px',
+                fill: '#2c3e50',
+                fontFamily: 'Arial, sans-serif'
+            }).setOrigin(0.5);
+        }
+        
+        // Wallet Connection Functions
+        async function connectWallet() {
+            try {
+                if (typeof window.ethereum !== 'undefined') {
+                    updateStatus('Connecting to wallet...');
+                    
+                    // Request account access
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    
+                    // Initialize ethers provider
+                    gameState.web3Provider = new ethers.BrowserProvider(window.ethereum);
+                    gameState.signer = await gameState.web3Provider.getSigner();
+                    gameState.userAddress = await gameState.signer.getAddress();
+                    
+                    // Initialize contract (mock for demo)
+                    gameState.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, gameState.signer);
+                    
+                    gameState.isConnected = true;
+                    
+                    // Update UI
+                    document.getElementById('walletStatus').textContent = `Connected: ${gameState.userAddress.substring(0, 10)}...`;
+                    document.getElementById('connectWallet').textContent = 'Connected';
+                    document.getElementById('connectWallet').disabled = true;
+                    document.getElementById('mintBtn').disabled = false;
+                    
+                    // Get user balance and network
+                    await updateWalletInfo();
+                    
+                    // Load user's Pokemon
+                    await loadUserPokemon();
+                    
+                    updateStatus('Wallet connected successfully!');
+                } else {
+                    updateStatus('Please install MetaMask or another Web3 wallet');
+                }
+            } catch (error) {
+                console.error('Wallet connection failed:', error);
+                updateStatus('Wallet connection failed');
+            }
+        }
+        
+        async function updateWalletInfo() {
+            try {
+                // Get balance
+                const balance = await gameState.web3Provider.getBalance(gameState.userAddress);
+                document.getElementById('balance').textContent = ethers.formatEther(balance).substring(0, 6);
+                
+                // Get network
+                const network = await gameState.web3Provider.getNetwork();
+                document.getElementById('network').textContent = network.name;
+            } catch (error) {
+                console.error('Error updating wallet info:', error);
+            }
+        }
+        
+        // Pokemon Management Functions
+        async function mintPokemon() {
+            if (!gameState.isConnected) {
+                updateStatus('Please connect your wallet first');
+                return;
+            }
+            
+            try {
+                updateStatus('Minting new Pokemon...');
+                document.getElementById('mintBtn').disabled = true;
+                
+                // Mock minting process (in real implementation, this would call the smart contract)
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Generate random Pokemon
+                const newPokemon = generateRandomPokemon();
+                gameState.userPokemon.push(newPokemon);
+                
+                // Update UI
+                updatePokemonList();
+                updateStatus(`Successfully minted ${newPokemon.name}!`);
+                
+                // Add to game scene
+                addPokemonToScene(newPokemon);
+                
+                document.getElementById('mintBtn').disabled = false;
+                
+            } catch (error) {
+                console.error('Minting failed:', error);
+                updateStatus('Minting failed');
+                document.getElementById('mintBtn').disabled = false;
+            }
+        }
+        
+        function generateRandomPokemon() {
+            const id = Date.now() + Math.random();
+            const name = POKEMON_NAMES[Math.floor(Math.random() * POKEMON_NAMES.length)];
+            const attack = Math.floor(Math.random() * 50) + 30;
+            const defense = Math.floor(Math.random() * 50) + 30;
+            const agility = Math.floor(Math.random() * 50) + 30;
+            
+            return new Pokemon(id, name, attack, defense, agility);
+        }
+        
+        async function loadUserPokemon() {
+            // Mock loading user's Pokemon (in real implementation, this would query the smart contract)
+            if (gameState.userPokemon.length === 0) {
+                // Add a starter Pokemon for demo
+                const starter = new Pokemon(1, "Starter", 40, 35, 45);
+                gameState.userPokemon.push(starter);
+            }
+            
+            updatePokemonList();
+            gameState.userPokemon.forEach(pokemon => addPokemonToScene(pokemon));
+        }
+        
+        function updatePokemonList() {
+            const listElement = document.getElementById('pokemonList');
+            
+            if (gameState.userPokemon.length === 0) {
+                listElement.innerHTML = 'No Pokemon owned';
+                return;
+            }
+            
+            let html = '';
+            gameState.userPokemon.forEach((pokemon, index) => {
+                html += `
+                    <div style="margin: 5px 0; padding: 5px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                        <strong>${pokemon.name}</strong><br>
+                        ATK: ${pokemon.attack} | DEF: ${pokemon.defense} | AGI: ${pokemon.agility}<br>
+                        <button onclick="selectPokemon(${index})" style="padding: 2px 8px; font-size: 12px;">Select</button>
+                    </div>
+                `;
+            });
+            
+            listElement.innerHTML = html;
+        }
+        
+        function selectPokemon(index) {
+            gameState.selectedPokemon = gameState.userPokemon[index];
+            document.getElementById('selectedPokemon').textContent = gameState.selectedPokemon.name;
+            document.getElementById('battleBtn').disabled = false;
+            
+            // Highlight selected Pokemon in game
+            highlightSelectedPokemon(gameState.selectedPokemon);
+            
+            updateStatus(`Selected ${gameState.selectedPokemon.name} for battle!`);
+        }
+        
+        function addPokemonToScene(pokemon) {
+            if (!gameState.gameScene) return;
+            
+            const spriteIndex = Math.floor(Math.random() * 10);
+            const x = 150 + (Object.keys(pokemonSprites).length * 100);
+            const y = 200;
+            
+            const sprite = gameState.gameScene.add.image(x, y, `pokemon_${spriteIndex}`)
+                .setScale(0.8)
+                .setInteractive()
+                .on('pointerdown', () => {
+                    const index = gameState.userPokemon.findIndex(p => p.id === pokemon.id);
+                    if (index !== -1) selectPokemon(index);
+                });
+            
+            // Add name label
+            gameState.gameScene.add.text(x, y + 50, pokemon.name, {
+                fontSize: '14px',
+                fill: '#ecf0f1',
+                fontFamily: 'Arial, sans-serif'
+            }).setOrigin(0.5);
+            
+            pokemonSprites[pokemon.id] = sprite;
+        }
+        
+        function highlightSelectedPokemon(pokemon) {
+            // Reset all sprites
+            Object.values(pokemonSprites).forEach(sprite => {
+                sprite.setTint(0xffffff);
+                sprite.setScale(0.8);
+            });
+            
+            // Highlight selected
+            if (pokemonSprites[pokemon.id]) {
+                pokemonSprites[pokemon.id].setTint(0xffff00);
+                pokemonSprites[pokemon.id].setScale(1.0);
+            }
+        }
+        
+        // Battle System
+        async function findBattle() {
+            if (!gameState.selectedPokemon) {
+                updateStatus('Please select a Pokemon first');
+                return;
+            }
+            
+            updateStatus('Finding opponent...');
+            document.getElementById('battleBtn').disabled = true;
+            
+            // Mock opponent finding
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // Generate random opponent
+            gameState.opponent = generateRandomPokemon();
+            gameState.opponent.name = "Wild " + gameState.opponent.name;
+            
+            // Add opponent to battle arena
+            if (gameState.gameScene) {
+                if (gameState.opponentSprite) {
+                    gameState.opponentSprite.destroy();
+                }
+                
+                const spriteIndex = Math.floor(Math.random() * 10);
+                gameState.opponentSprite = gameState.gameScene.add.image(
+                    gameState.gameScene.opponentPosition.x,
+                    gameState.gameScene.opponentPosition.y,
+                    `pokemon_${spriteIndex}`
+                ).setScale(1.0);
+                
+                gameState.gameScene.add.text(
+                    gameState.gameScene.opponentPosition.x,
+                    gameState.gameScene.opponentPosition.y + 50,
+                    gameState.opponent.name,
+                    {
+                        fontSize: '14px',
+                        fill: '#e74c3c',
+                        fontFamily: 'Arial, sans-serif'
+                    }
+                ).setOrigin(0.5);
+            }
+            
+            updateStatus(`Found opponent: ${gameState.opponent.name}! Ready to battle.`);
+            document.getElementById('executeBtn').disabled = false;
+            document.getElementById('battleBtn').disabled = false;
+        }
+        
+        async function executeBattle() {
+            if (!gameState.selectedPokemon || !gameState.opponent) {
+                updateStatus('Battle requirements not met');
+                return;
+            }
+            
+            document.getElementById('executeBtn').disabled = true;
+            updateStatus('Battle in progress...');
+            
+            // Start battle animation
+            startBattleAnimation();
+            
+            // Calculate battle result
+            const playerPower = gameState.selectedPokemon.calculatePower();
+            const opponentPower = gameState.opponent.calculatePower();
+            
+            // Add some randomness
+            const playerRoll = playerPower + (Math.random() * 20);
+            const opponentRoll = opponentPower + (Math.random() * 20);
+            
+            // Simulate battle duration
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Determine winner
+            const playerWins = playerRoll > opponentRoll;
+            
+            if (playerWins) {
+                updateStatus(`Victory! ${gameState.selectedPokemon.name} defeated ${gameState.opponent.name}!`);
+                // Award experience or items (mock)
+                gameState.selectedPokemon.attack += 1;
+                gameState.selectedPokemon.defense += 1;
+                gameState.selectedPokemon.agility += 1;
+                updatePokemonList();
+            } else {
+                updateStatus(`Defeat! ${gameState.opponent.name} defeated ${gameState.selectedPokemon.name}.`);
+            }
+            
+            // Stop battle animation
+            stopBattleAnimation();
+            
+            // Re-enable battle button
+            setTimeout(() => {
+                document.getElementById('executeBtn').disabled = false;
+            }, 2000);
+        }
+        
+        function startBattleAnimation() {
+            if (!gameState.gameScene) return;
+            
+            battleAnimation = {
+                playerSprite: pokemonSprites[gameState.selectedPokemon.id],
+                opponentSprite: gameState.opponentSprite,
+                time: 0,
+                duration: 3000
+            };
+            
+            // Move player Pokemon to battle position
+            gameState.gameScene.tweens.add({
+                targets: battleAnimation.playerSprite,
+                x: gameState.gameScene.playerPosition.x,
+                y: gameState.gameScene.playerPosition.y,
+                duration: 500,
+                ease: 'Power2'
+            });
+        }
+        
+        function updateBattleAnimation() {
+            if (!battleAnimation) return;
+            
+            battleAnimation.time += 16; // ~60fps
+            
+            // Shake effect during battle
+            const shakeIntensity = 5;
+            if (battleAnimation.playerSprite) {
+                battleAnimation.playerSprite.x = gameState.gameScene.playerPosition.x + 
+                    (Math.random() - 0.5) * shakeIntensity;
+            }
+            if (battleAnimation.opponentSprite) {
+                battleAnimation.opponentSprite.x = gameState.gameScene.opponentPosition.x + 
+                    (Math.random() - 0.5) * shakeIntensity;
+            }
+        }
+        
+        function stopBattleAnimation() {
+            if (!battleAnimation) return;
+            
+            // Return sprites to original positions
+            if (battleAnimation.playerSprite) {
+                gameState.gameScene.tweens.add({
+                    targets: battleAnimation.playerSprite,
+                    x: 150 + (gameState.userPokemon.findIndex(p => p.id === gameState.selectedPokemon.id) * 100),
+                    y: 200,
+                    duration: 500,
+                    ease: 'Power2'
+                });
+            }
+            
+            battleAnimation = null;
+        }
+        
+        // Utility Functions
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            console.log('Status:', message);
+        }
+        
+        // Event Listeners
+        window.addEventListener('load', () => {
+            // Initialize Phaser game
+            game = new Phaser.Game(gameConfig);
+            
+            // Listen for wallet events
+            if (window.ethereum) {
+                window.ethereum.on('accountsChanged', (accounts) => {
+                    if (accounts.length === 0) {
+                        // User disconnected
+                        gameState.isConnected = false;
+                        location.reload();
+                    }
+                });
+                
+                window.ethereum.on('chainChanged', () => {
+                    location.reload();
+                });
+            }
+        });
+        
+        // Mock Smart Contract Integration (replace with actual contract calls)
+        class MockSmartContract {
+            static async mintPokemon() {
+                // Simulate transaction
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve({
+                            hash: '0x' + Math.random().toString(16).substr(2, 64),
+                            wait: () => Promise.resolve()
+                        });
+                    }, 1000);
+                });
+            }
+            
+            static async getPokemon(tokenId) {
+                // Mock data
+                return {
+                    name: POKEMON_NAMES[Math.floor(Math.random() * POKEMON_NAMES.length)],
+                    attack: Math.floor(Math.random() * 50) + 30,
+                    defense: Math.floor(Math.random() * 50) + 30,
+                    agility: Math.floor(Math.random() * 50) + 30
+                };
+            }
+            
+            static async battle(pokemon1Id, pokemon2Id) {
+                // Simulate battle transaction
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve(Math.random() > 0.5);
+                    }, 2000);
+                });
+            }
+        }
+        
+        // Export for testing
+        window.gameState = gameState;
+        window.Pokemon = Pokemon;
+    </script>
+</body>
+</html>
