@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokemon NFT Creator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.1.1/web3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.5.0/axios.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .wallet-status {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            color: white;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6);
+        }
+        
+        .btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .creator-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .image-upload {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+        }
+        
+        .image-preview {
+            width: 100%;
+            height: 300px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .image-preview img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 10px;
+        }
+        
+        .upload-text {
+            text-align: center;
+            opacity: 0.7;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            width: 100%;
+        }
+        
+        .pokemon-form {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 1rem;
+        }
+        
+        .form-group input::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        
+        .mint-btn {
+            background: linear-gradient(45deg, #ffa726, #ff7043);
+            width: 100%;
+            font-size: 1.2rem;
+            padding: 20px;
+        }
+        
+        .pokemon-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .pokemon-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+        
+        .pokemon-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .pokemon-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .pokemon-stats {
+            text-align: left;
+            margin-top: 15px;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid white;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .status-message {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+            text-align: center;
+        }
+        
+        .success {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4caf50;
+        }
+        
+        .error {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid #f44336;
+        }
+        
+        @media (max-width: 768px) {
+            .creator-section {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 Pokemon NFT Creator 🔥</h1>
+            <p>Create, mint, and collect unique Pokemon NFTs on the blockchain!</p>
+        </div>
+        
+        <div class="wallet-status">
+            <div id="walletInfo">
+                <button id="connectWallet" class="btn">Connect MetaMask Wallet</button>
+            </div>
+        </div>
+        
+        <div class="creator-section">
+            <div class="image-upload">
+                <h2>📸 Upload Pokemon Image</h2>
+                <div class="image-preview" id="imagePreview">
+                    <div class="upload-text">
+                        <p>Click to upload your Pokemon image</p>
+                        <small>Supports JPG, PNG, GIF</small>
+                    </div>
+                </div>
+                <input type="file" id="fileInput" class="file-input" accept="image/*">
+                <button id="uploadBtn" class="btn upload-btn">Choose Image</button>
+                <div id="uploadStatus"></div>
+            </div>
+            
+            <div class="pokemon-form">
+                <h2>⚡ Pokemon Details</h2>
+                <div class="form-group">
+                    <label for="pokemonName">Pokemon Name</label>
+                    <input type="text" id="pokemonName" placeholder="Enter Pokemon name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="pokemonType">Pokemon Type</label>
+                    <select id="pokemonType">
+                        <option value="">Select Type</option>
+                        <option value="Fire">🔥 Fire</option>
+                        <option value="Water">💧 Water</option>
+                        <option value="Grass">🌱 Grass</option>
+                        <option value="Electric">⚡ Electric</option>
+                        <option value="Flying">🌪️ Flying</option>
+                        <option value="Psychic">🔮 Psychic</option>
+                        <option value="Fighting">👊 Fighting</option>
+                        <option value="Rock">🗿 Rock</option>
+                        <option value="Ground">🌍 Ground</option>
+                        <option value="Ice">❄️ Ice</option>
+                    </select>
+                </div>
+                
+                <button id="mintBtn" class="btn mint-btn" disabled>
+                    🎯 Mint Pokemon NFT
+                </button>
+                
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Minting your Pokemon...</p>
+                </div>
+                
+                <div id="mintStatus"></div>
+            </div>
+        </div>
+        
+        <div id="pokemonGallery">
+            <h2 style="text-align: center; margin-bottom: 30px;">🏆 Your Pokemon Collection</h2>
+            <div class="pokemon-gallery" id="galleryGrid"></div>
+        </div>
+    </div>
+
+    <script>
+        class PokemonNFTApp {
+            constructor() {
+                this.web3 = null;
+                this.account = null;
+                this.contract = null;
+                this.contractAddress = '0x...'; // Your deployed contract address
+                this.contractABI = []; // Your contract ABI
+                this.ipfsData = null;
+                
+                this.init();
+            }
+            
+            async init() {
+                this.bindEvents();
+                await this.checkMetaMask();
+            }
+            
+            bindEvents() {
+                document.getElementById('connectWallet').addEventListener('click', () => this.connectWallet());
+                document.getElementById('uploadBtn').addEventListener('click', () => {
+                    document.getElementById('fileInput').click();
+                });
+                document.getElementById('fileInput').addEventListener('change', (e) => this.handleImageUpload(e));
+                document.getElementById('mintBtn').addEventListener('click', () => this.mintPokemon());
+                
+                // Enable mint button when all fields are filled
+                document.getElementById('pokemonName').addEventListener('input', () => this.checkFormValidity());
+                document.getElementById('pokemonType').addEventListener('change', () => this.checkFormValidity());
+            }
+            
+            async checkMetaMask() {
+                if (typeof window.ethereum !== 'undefined') {
+                    this.web3 = new Web3(window.ethereum);
+                    
+                    // Check if already connected
+                    const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                    if (accounts.length > 0) {
+                        this.account = accounts[0];
+                        this.updateWalletUI();
+                        await this.initContract();
+                    }
+                } else {
+                    this.showStatus('MetaMask is not installed. Please install MetaMask to use this app.', 'error');
+                }
+            }
+            
+            async connectWallet() {
+                try {
+                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    this.account = accounts[0];
+                    this.updateWalletUI();
+                    await this.initContract();
+                    this.showStatus('Wallet connected successfully!', 'success');
+                } catch (error) {
+                    console.error('Error connecting wallet:', error);
+                    this.showStatus('Failed to connect wallet. Please try again.', 'error');
+                }
+            }
+            
+            updateWalletUI() {
+                const walletInfo = document.getElementById('walletInfo');
+                if (this.account) {
+                    walletInfo.innerHTML = `
+                        <p><strong>Connected:</strong> ${this.account.substring(0, 6)}...${this.account.substring(38)}</p>
+                        <p><strong>Network:</strong> <span id="networkName">Loading...</span></p>
+                    `;
+                    this.updateNetworkInfo();
+                }
+            }
+            
+            async updateNetworkInfo() {
+                try {
+                    const networkId = await this.web3.eth.getChainId();
+                    const networkNames = {
+                        1: 'Ethereum Mainnet',
+                        5: 'Goerli Testnet',
+                        11155111: 'Sepolia Testnet',
+                        137: 'Polygon Mainnet',
+                        80001: 'Mumbai Testnet'
+                    };
+                    document.getElementById('networkName').textContent = networkNames[networkId] || `Network ID: ${networkId}`;
+                } catch (error) {
+                    console.error('Error getting network info:', error);
+                }
+            }
+            
+            async initContract() {
+                // Initialize contract instance
+                // You'll need to replace this with your actual contract ABI and address
+                this.contractABI = [
+                    // Add your contract ABI here
+                ];
+                
+                if (this.contractAddress && this.contractABI.length > 0) {
+                    this.contract = new this.web3.eth.Contract(this.contractABI, this.contractAddress);
+                    await this.loadUserPokemon();
+                }
+            }
+            
+            async handleImageUpload(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                // Validate file type
+                if (!file.type.startsWith('image/')) {
+                    this.showStatus('Please select a valid image file.', 'error');
+                    return;
+                }
+                
+                // Preview image
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const preview = document.getElementById('imagePreview');
+                    preview.innerHTML = `<img src="${e.target.result}" alt="Pokemon Preview">`;
+                };
+                reader.readAsDataURL(file);
+                
+                // Upload to IPFS (simulated - you'll need to integrate with a real IPFS service)
+                await this.uploadToIPFS(file);
+            }
+            
+            async uploadToIPFS(file) {
+                try {
+                    this.showStatus('Uploading image to IPFS...', 'success');
+                    
+                    // Simulate IPFS upload (replace with actual IPFS integration)
+                    // You can use services like Pinata, Infura IPFS, or Web3.Storage
+                    
+                    // For demo purposes, we'll simulate the upload
+                    await this.simulateIPFSUpload(file);
+                    
+                    this.showStatus('Image uploaded to IPFS successfully!', 'success');
+                    this.checkFormValidity();
+                } catch (error) {
+                    console.error('IPFS upload error:', error);
+                    this.showStatus('Failed to upload image to IPFS. Please try again.', 'error');
+                }
+            }
+            
+            async simulateIPFSUpload(file) {
+                // Simulate IPFS upload delay
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Create a mock IPFS hash
+                this.ipfsData = {
+                    hash: 'QmX...' + Math.random().toString(36).substring(7),
+                    url: 'https://ipfs.io/ipfs/QmX...' + Math.random().toString(36).substring(7)
+                };
+                
+                // In a real implementation, you would:
+                // 1. Upload the file to IPFS
+                // 2. Create metadata JSON with image URL and Pokemon details
+                // 3. Upload metadata to IPFS
+                // 4. Return the metadata IPFS hash
+            }
+            
+            checkFormValidity() {
+                const name = document.getElementById('pokemonName').value.trim();
+                const type = document.getElementById('pokemonType').value;
+                const hasImage = this.ipfsData !== null;
+                const isConnected = this.account !== null;
+                
+                const mintBtn = document.getElementById('mintBtn');
+                mintBtn.disabled = !(name && type && hasImage && isConnected);
+            }
+            
+            async mintPokemon() {
+                if (!this.contract) {
+                    this.showStatus('Contract not initialized. Please refresh and try again.', 'error');
+                    return;
+                }
+                
+                const name = document.getElementById('pokemonName').value.trim();
+                const type = document.getElementById('pokemonType').value;
+                
+                if (!name || !type || !this.ipfsData) {
+                    this.showStatus('Please fill all fields and upload an image.', 'error');
+                    return;
+                }
+                
+                try {
+                    this.showLoading(true);
+                    this.showStatus('Minting your Pokemon NFT...', 'success');
+                    
+                    // Create metadata
+                    const metadata = {
+                        name: name,
+                        description: `A unique ${type} type Pokemon named ${name}`,
+                        image: this.ipfsData.url,
+                        attributes: [
+                            { trait_type: "Type", value: type },
+                            { trait_type: "Level", value: 1 },
+                            { trait_type: "Rarity", value: this.getRandomRarity() }
+                        ]
+                    };
+                    
+                    // In a real app, upload metadata to IPFS
+                    const metadataURI = await this.uploadMetadataToIPFS(metadata);
+                    
+                    // Call smart contract mint function
+                    const gasEstimate = await this.contract.methods.publicMint(
+                        metadataURI,
+                        name,
+                        type
+                    ).estimateGas({ from: this.account, value: this.web3.utils.toWei('0.001', 'ether') });
+                    
+                    const transaction = await this.contract.methods.publicMint(
+                        metadataURI,
+                        name,
+                        type
+                    ).send({
+                        from: this.account,
+                        value: this.web3.utils.toWei('0.001', 'ether'),
+                        gas: Math.floor(gasEstimate * 1.2)
+                    });
+                    
+                    this.showStatus(`Pokemon NFT minted successfully! Transaction: ${transaction.transactionHash}`, 'success');
+                    
+                    // Reset form
+                    this.resetForm();
+                    
+                    // Reload user's Pokemon
+                    await this.loadUserPokemon();
+                    
+                } catch (error) {
+                    console.error('Minting error:', error);
+                    this.showStatus('Failed to mint Pokemon NFT. Please try again.', 'error');
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+            
+            async uploadMetadataToIPFS(metadata) {
+                // Simulate metadata upload to IPFS
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return 'QmMetadata...' + Math.random().toString(36).substring(7);
+            }
+            
+            getRandomRarity() {
+                const rarities = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+                const weights = [50, 30, 15, 4, 1]; // Percentage weights
+                
+                const random = Math.random() * 100;
+                let cumulative = 0;
+                
+                for (let i = 0; i < rarities.length; i++) {
+                    cumulative += weights[i];
+                    if (random <= cumulative) {
+                        return rarities[i];
+                    }
+                }
+                
+                return 'Common';
+            }
+            
+            async loadUserPokemon() {
+                if (!this.contract || !this.account) return;
+                
+                try {
+                    // Get user's Pokemon token IDs
+                    const tokenIds = await this.contract.methods.getPokemonByOwner(this.account).call();
+                    
+                    const galleryGrid = document.getElementById('galleryGrid');
+                    galleryGrid.innerHTML = '';
+                    
+                    if (tokenIds.length === 0) {
+                        galleryGrid.innerHTML = '<p style="text-align: center; grid-column: 1 / -1;">No Pokemon found. Mint your first one!</p>';
+                        return;
+                    }
+                    
+                    // Load Pokemon data
+                    for (const tokenId of tokenIds
