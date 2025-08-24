@@ -1,0 +1,672 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Sword, Shield, Zap, Eye, Heart, Moon, Target, Battery, Wallet, Plus, Gamepad2, Sparkles, Trophy, Settings } from 'lucide-react';
+
+// Mock Web3 and ML utilities (in real implementation, these would be actual libraries)
+const mockWeb3 = {
+  connect: () => Promise.resolve({ address: '0x1234...5678', balance: '2.5' }),
+  mintNFT: (metadata) => Promise.resolve({ tokenId: Math.floor(Math.random() * 10000), txHash: '0xabc...def' }),
+  deployContract: () => Promise.resolve({ address: '0xcontract...address' })
+};
+
+const mockML = {
+  analyzeBattle: (pokemon1, pokemon2, history) => {
+    const effectiveness = Math.random() * 0.3 + 0.7; // 0.7-1.0 effectiveness
+    return { effectiveness, recommendation: Math.random() > 0.5 ? 'attack' : 'defend' };
+  },
+  adaptDifficulty: (playerStats) => {
+    return Math.max(0.3, Math.min(1.5, playerStats.winRate > 0.7 ? 1.2 : 0.8));
+  },
+  predictPlayerBehavior: (actions) => {
+    return actions.length > 5 ? 'aggressive' : 'defensive';
+  }
+};
+
+// Smart Contract Logic (Solidity-like structure in JS)
+const PokemonContract = {
+  createPokemon: (attributes, imageUrl) => {
+    return {
+      id: Date.now(),
+      attributes,
+      imageUrl,
+      owner: '0x1234...5678',
+      level: 1,
+      experience: 0,
+      created: new Date().toISOString()
+    };
+  },
+  
+  battle: (pokemon1, pokemon2) => {
+    const calculateDamage = (attacker, defender) => {
+      const baseDamage = attacker.attack;
+      const defense = defender.defense;
+      const agility = attacker.agility;
+      const dodge = defender.dodge;
+      
+      let damage = Math.max(1, baseDamage - defense);
+      
+      // Apply dodge chance
+      if (Math.random() < dodge / 100) return 0;
+      
+      // Apply miss chance
+      if (Math.random() < attacker.miss / 100) return 0;
+      
+      // Apply hyper charge boost
+      if (Math.random() < attacker.hyperCharge / 100) damage *= 2;
+      
+      return Math.floor(damage);
+    };
+    
+    let hp1 = 100, hp2 = 100;
+    const battleLog = [];
+    
+    while (hp1 > 0 && hp2 > 0) {
+      const damage1 = calculateDamage(pokemon1.attributes, pokemon2.attributes);
+      const damage2 = calculateDamage(pokemon2.attributes, pokemon1.attributes);
+      
+      hp2 -= damage1;
+      hp1 -= damage2;
+      
+      battleLog.push({
+        p1Damage: damage1,
+        p2Damage: damage2,
+        p1Hp: Math.max(0, hp1),
+        p2Hp: Math.max(0, hp2)
+      });
+      
+      if (battleLog.length > 20) break; // Prevent infinite loops
+    }
+    
+    return {
+      winner: hp1 > hp2 ? 'pokemon1' : 'pokemon2',
+      battleLog,
+      experience: 50
+    };
+  }
+};
+
+const Web3PokemonGame = () => {
+  const [wallet, setWallet] = useState(null);
+  const [activeTab, setActiveTab] = useState('create');
+  const [pokemons, setPokemons] = useState([]);
+  const [selectedPokemon, setSelectedPokemon] = useState(null);
+  const [battlePokemon, setBattlePokemon] = useState(null);
+  const [gameStats, setGameStats] = useState({
+    battles: 0,
+    wins: 0,
+    pokemonsCreated: 0,
+    totalExperience: 0
+  });
+  const [mlInsights, setMlInsights] = useState({});
+  const [isCreating, setIsCreating] = useState(false);
+  const [battleResult, setBattleResult] = useState(null);
+
+  // Pokemon creation state
+  const [pokemonName, setPokemonName] = useState('');
+  const [pokemonImage, setPokemonImage] = useState('');
+  const [attributes, setAttributes] = useState({
+    attack: 50,
+    defense: 50,
+    agility: 50,
+    dodge: 20,
+    faint: 10,
+    sleep: 15,
+    miss: 10,
+    hyperCharge: 25
+  });
+
+  // Connect wallet
+  const connectWallet = async () => {
+    try {
+      const walletData = await mockWeb3.connect();
+      setWallet(walletData);
+    } catch (error) {
+      console.error('Wallet connection failed:', error);
+    }
+  };
+
+  // Create and mint Pokemon NFT
+  const createAndMintPokemon = async () => {
+    if (!wallet || !pokemonName || !pokemonImage) return;
+    
+    setIsCreating(true);
+    try {
+      const pokemon = PokemonContract.createPokemon(attributes, pokemonImage);
+      pokemon.name = pokemonName;
+      
+      // Mint NFT through smart contract
+      const mintResult = await mockWeb3.mintNFT({
+        name: pokemonName,
+        image: pokemonImage,
+        attributes: attributes
+      });
+      
+      pokemon.tokenId = mintResult.tokenId;
+      pokemon.txHash = mintResult.txHash;
+      
+      setPokemons(prev => [...prev, pokemon]);
+      setGameStats(prev => ({
+        ...prev,
+        pokemonsCreated: prev.pokemonsCreated + 1
+      }));
+      
+      // Reset form
+      setPokemonName('');
+      setPokemonImage('');
+      setAttributes({
+        attack: 50,
+        defense: 50,
+        agility: 50,
+        dodge: 20,
+        faint: 10,
+        sleep: 15,
+        miss: 10,
+        hyperCharge: 25
+      });
+      
+    } catch (error) {
+      console.error('Pokemon creation failed:', error);
+    }
+    setIsCreating(false);
+  };
+
+  // Battle system with ML integration
+  const battle = async (pokemon1, pokemon2) => {
+    const battleHistory = JSON.parse(localStorage.getItem('battleHistory') || '[]');
+    
+    // ML analysis
+    const mlAnalysis = mockML.analyzeBattle(pokemon1, pokemon2, battleHistory);
+    const difficultyMultiplier = mockML.adaptDifficulty(gameStats);
+    
+    // Apply ML insights to battle
+    const enhancedPokemon2 = {
+      ...pokemon2,
+      attributes: {
+        ...pokemon2.attributes,
+        attack: Math.floor(pokemon2.attributes.attack * difficultyMultiplier),
+        defense: Math.floor(pokemon2.attributes.defense * difficultyMultiplier)
+      }
+    };
+    
+    const result = PokemonContract.battle(pokemon1, enhancedPokemon2);
+    
+    // Update stats and store battle history
+    const newBattle = {
+      pokemon1: pokemon1.name,
+      pokemon2: pokemon2.name,
+      winner: result.winner,
+      timestamp: Date.now()
+    };
+    
+    battleHistory.push(newBattle);
+    localStorage.setItem('battleHistory', JSON.stringify(battleHistory.slice(-100))); // Keep last 100 battles
+    
+    setGameStats(prev => ({
+      ...prev,
+      battles: prev.battles + 1,
+      wins: prev.wins + (result.winner === 'pokemon1' ? 1 : 0),
+      totalExperience: prev.totalExperience + result.experience
+    }));
+    
+    setBattleResult({
+      ...result,
+      mlInsights: {
+        effectiveness: mlAnalysis.effectiveness,
+        recommendation: mlAnalysis.recommendation,
+        difficultyAdjusted: difficultyMultiplier !== 1
+      }
+    });
+    
+    return result;
+  };
+
+  // ML-driven UI adaptations
+  useEffect(() => {
+    const actions = JSON.parse(localStorage.getItem('userActions') || '[]');
+    if (actions.length > 0) {
+      const behavior = mockML.predictPlayerBehavior(actions);
+      setMlInsights({ playerBehavior: behavior });
+    }
+  }, [gameStats]);
+
+  const AttributeSlider = ({ label, value, onChange, icon: Icon, max = 100 }) => (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center space-x-2">
+          <Icon size={16} className="text-blue-400" />
+          <span className="text-white font-medium">{label}</span>
+        </div>
+        <span className="text-blue-300 font-bold">{value}</span>
+      </div>
+      <div className="relative">
+        <input
+          type="range"
+          min="1"
+          max={max}
+          value={value}
+          onChange={onChange}
+          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+        />
+        <div 
+          className="absolute top-0 h-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg pointer-events-none"
+          style={{ width: `${(value / max) * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+
+  const PokemonCard = ({ pokemon, onSelect, isSelected, showBattle = false }) => (
+    <div 
+      className={`relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl p-4 cursor-pointer transition-all duration-300 hover:scale-105 border-2 ${
+        isSelected ? 'border-blue-400 shadow-blue-400/50' : 'border-gray-600'
+      } shadow-lg hover:shadow-xl`}
+      onClick={() => onSelect(pokemon)}
+    >
+      <div className="absolute top-2 right-2">
+        <div className="bg-purple-600 px-2 py-1 rounded-full text-xs text-white font-bold">
+          Lvl {pokemon.level}
+        </div>
+      </div>
+      
+      <div className="w-full h-32 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg mb-3 flex items-center justify-center border border-gray-600">
+        {pokemon.imageUrl ? (
+          <img src={pokemon.imageUrl} alt={pokemon.name} className="w-full h-full object-cover rounded-lg" />
+        ) : (
+          <Sparkles size={32} className="text-gray-400" />
+        )}
+      </div>
+      
+      <h3 className="text-white font-bold text-lg mb-2">{pokemon.name}</h3>
+      
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="flex items-center space-x-1">
+          <Sword size={12} className="text-red-400" />
+          <span className="text-gray-300">{pokemon.attributes.attack}</span>
+        </div>
+        <div className="flex items-center space-x-1">
+          <Shield size={12} className="text-blue-400" />
+          <span className="text-gray-300">{pokemon.attributes.defense}</span>
+        </div>
+        <div className="flex items-center space-x-1">
+          <Zap size={12} className="text-yellow-400" />
+          <span className="text-gray-300">{pokemon.attributes.agility}</span>
+        </div>
+        <div className="flex items-center space-x-1">
+          <Eye size={12} className="text-green-400" />
+          <span className="text-gray-300">{pokemon.attributes.dodge}</span>
+        </div>
+      </div>
+      
+      {showBattle && (
+        <button
+          className="w-full mt-3 bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 transform hover:scale-105"
+          onClick={(e) => {
+            e.stopPropagation();
+            battle(selectedPokemon, pokemon);
+          }}
+        >
+          <Gamepad2 size={16} className="inline mr-2" />
+          Battle!
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 text-white">
+      {/* Header */}
+      <div className="bg-black/50 backdrop-blur-sm border-b border-gray-700">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                <Sparkles size={24} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                  Web3 Pokemon Arena
+                </h1>
+                <p className="text-gray-400 text-sm">Blockchain-Powered Pokemon Battles</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              {mlInsights.playerBehavior && (
+                <div className="bg-green-600/20 px-3 py-1 rounded-full text-green-400 text-sm">
+                  AI: {mlInsights.playerBehavior} player
+                </div>
+              )}
+              
+              {wallet ? (
+                <div className="bg-green-600/20 px-4 py-2 rounded-lg flex items-center space-x-2">
+                  <Wallet size={16} className="text-green-400" />
+                  <div>
+                    <div className="text-green-400 font-bold">{wallet.address}</div>
+                    <div className="text-green-300 text-sm">{wallet.balance} ETH</div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={connectWallet}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 px-6 py-2 rounded-lg font-bold transition-all duration-200 transform hover:scale-105"
+                >
+                  <Wallet size={16} className="inline mr-2" />
+                  Connect Wallet
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Bar */}
+      <div className="bg-black/30 backdrop-blur-sm border-b border-gray-700">
+        <div className="container mx-auto px-6 py-3">
+          <div className="flex items-center justify-center space-x-8 text-sm">
+            <div className="flex items-center space-x-2">
+              <Trophy size={16} className="text-yellow-400" />
+              <span>Battles: {gameStats.battles}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Target size={16} className="text-green-400" />
+              <span>Wins: {gameStats.wins}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Sparkles size={16} className="text-blue-400" />
+              <span>Created: {gameStats.pokemonsCreated}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Battery size={16} className="text-purple-400" />
+              <span>XP: {gameStats.totalExperience}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-6 py-8">
+        {/* Navigation */}
+        <div className="flex justify-center mb-8">
+          <div className="bg-black/50 backdrop-blur-sm rounded-xl p-2 border border-gray-700">
+            {[
+              { id: 'create', label: 'Create Pokemon', icon: Plus },
+              { id: 'collection', label: 'My Collection', icon: Trophy },
+              { id: 'battle', label: 'Battle Arena', icon: Gamepad2 }
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2 ${
+                  activeTab === id
+                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                }`}
+              >
+                <Icon size={16} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Create Pokemon Tab */}
+        {activeTab === 'create' && (
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-black/50 backdrop-blur-sm rounded-2xl p-8 border border-gray-700">
+              <h2 className="text-3xl font-bold mb-6 text-center bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                Create Your Pokemon NFT
+              </h2>
+              
+              <div className="grid md:grid-cols-2 gap-8">
+                {/* Basic Info */}
+                <div>
+                  <div className="mb-6">
+                    <label className="block text-white font-medium mb-2">Pokemon Name</label>
+                    <input
+                      type="text"
+                      value={pokemonName}
+                      onChange={(e) => setPokemonName(e.target.value)}
+                      className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-blue-400 focus:outline-none"
+                      placeholder="Enter Pokemon name..."
+                    />
+                  </div>
+                  
+                  <div className="mb-6">
+                    <label className="block text-white font-medium mb-2">Image URL</label>
+                    <input
+                      type="url"
+                      value={pokemonImage}
+                      onChange={(e) => setPokemonImage(e.target.value)}
+                      className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-blue-400 focus:outline-none"
+                      placeholder="https://example.com/pokemon.png"
+                    />
+                  </div>
+                  
+                  {/* Preview */}
+                  <div className="bg-gray-800 rounded-xl p-4 border border-gray-600">
+                    <h3 className="text-white font-medium mb-3">Preview</h3>
+                    <div className="w-full h-48 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-gray-600">
+                      {pokemonImage ? (
+                        <img src={pokemonImage} alt="Preview" className="w-full h-full object-cover rounded-lg" />
+                      ) : (
+                        <Sparkles size={48} className="text-gray-500" />
+                      )}
+                    </div>
+                    {pokemonName && (
+                      <p className="text-white font-bold text-center mt-3">{pokemonName}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Attributes */}
+                <div>
+                  <h3 className="text-xl font-bold mb-4 text-white">Battle Attributes</h3>
+                  
+                  <AttributeSlider
+                    label="Attack"
+                    value={attributes.attack}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, attack: parseInt(e.target.value) }))}
+                    icon={Sword}
+                  />
+                  
+                  <AttributeSlider
+                    label="Defense"
+                    value={attributes.defense}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, defense: parseInt(e.target.value) }))}
+                    icon={Shield}
+                  />
+                  
+                  <AttributeSlider
+                    label="Agility"
+                    value={attributes.agility}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, agility: parseInt(e.target.value) }))}
+                    icon={Zap}
+                  />
+                  
+                  <AttributeSlider
+                    label="Dodge"
+                    value={attributes.dodge}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, dodge: parseInt(e.target.value) }))}
+                    icon={Eye}
+                    max={50}
+                  />
+                  
+                  <AttributeSlider
+                    label="Faint Resistance"
+                    value={attributes.faint}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, faint: parseInt(e.target.value) }))}
+                    icon={Heart}
+                    max={50}
+                  />
+                  
+                  <AttributeSlider
+                    label="Sleep Resistance"
+                    value={attributes.sleep}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, sleep: parseInt(e.target.value) }))}
+                    icon={Moon}
+                    max={50}
+                  />
+                  
+                  <AttributeSlider
+                    label="Miss Chance"
+                    value={attributes.miss}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, miss: parseInt(e.target.value) }))}
+                    icon={Target}
+                    max={30}
+                  />
+                  
+                  <AttributeSlider
+                    label="Hyper Charge"
+                    value={attributes.hyperCharge}
+                    onChange={(e) => setAttributes(prev => ({ ...prev, hyperCharge: parseInt(e.target.value) }))}
+                    icon={Battery}
+                    max={50}
+                  />
+                </div>
+              </div>
+              
+              <div className="mt-8 text-center">
+                <button
+                  onClick={createAndMintPokemon}
+                  disabled={!wallet || !pokemonName || !pokemonImage || isCreating}
+                  className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 disabled:from-gray-600 disabled:to-gray-600 px-8 py-4 rounded-xl font-bold text-lg transition-all duration-200 transform hover:scale-105 disabled:cursor-not-allowed disabled:transform-none"
+                >
+                  {isCreating ? (
+                    <>
+                      <Settings size={20} className="inline mr-2 animate-spin" />
+                      Minting NFT...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={20} className="inline mr-2" />
+                      Create & Mint Pokemon NFT
+                    </>
+                  )}
+                </button>
+                {!wallet && (
+                  <p className="text-gray-400 mt-2">Connect your wallet to create Pokemon</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Collection Tab */}
+        {activeTab === 'collection' && (
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-3xl font-bold mb-8 text-center bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              Your Pokemon Collection
+            </h2>
+            
+            {pokemons.length === 0 ? (
+              <div className="bg-black/50 backdrop-blur-sm rounded-2xl p-12 text-center border border-gray-700">
+                <Sparkles size={64} className="mx-auto text-gray-500 mb-4" />
+                <h3 className="text-xl font-bold text-gray-400 mb-2">No Pokemon Yet</h3>
+                <p className="text-gray-500 mb-6">Create your first Pokemon to start your collection!</p>
+                <button
+                  onClick={() => setActiveTab('create')}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 px-6 py-3 rounded-lg font-bold transition-all duration-200"
+                >
+                  <Plus size={16} className="inline mr-2" />
+                  Create Pokemon
+                </button>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {pokemons.map((pokemon) => (
+                  <PokemonCard
+                    key={pokemon.id}
+                    pokemon={pokemon}
+                    onSelect={setSelectedPokemon}
+                    isSelected={selectedPokemon?.id === pokemon.id}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Battle Tab */}
+        {activeTab === 'battle' && (
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-3xl font-bold mb-8 text-center bg-gradient-to-r from-red-400 to-orange-400 bg-clip-text text-transparent">
+              Battle Arena
+            </h2>
+            
+            {!selectedPokemon ? (
+              <div className="bg-black/50 backdrop-blur-sm rounded-2xl p-12 text-center border border-gray-700">
+                <Gamepad2 size={64} className="mx-auto text-gray-500 mb-4" />
+                <h3 className="text-xl font-bold text-gray-400 mb-2">Select Your Fighter</h3>
+                <p className="text-gray-500 mb-6">Choose a Pokemon from your collection to battle!</p>
+                <button
+                  onClick={() => setActiveTab('collection')}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 px-6 py-3 rounded-lg font-bold transition-all duration-200"
+                >
+                  <Trophy size={16} className="inline mr-2" />
+                  View Collection
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* Selected Pokemon */}
+                <div className="bg-black/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700">
+                  <h3 className="text-xl font-bold mb-4 text-center">Your Fighter</h3>
+                  <div className="max-w-sm mx-auto">
+                    <PokemonCard
+                      pokemon={selectedPokemon}
+                      onSelect={() => {}}
+                      isSelected={true}
+                    />
+                  </div>
+                </div>
+
+                {/* AI Opponents */}
+                <div className="bg-black/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700">
+                  <h3 className="text-xl font-bold mb-6 text-center">Choose Your Opponent</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {[
+                      { name: 'Wild Pikachu', level: 5, attributes: { attack: 45, defense: 40, agility: 60, dodge: 30, faint: 20, sleep: 15, miss: 15, hyperCharge: 35 }},
+                      { name: 'Forest Guardian', level: 8, attributes: { attack: 60, defense: 70, agility: 40, dodge: 25, faint: 30, sleep: 20, miss: 10, hyperCharge: 20 }},
+                      { name: 'Lightning Beast', level: 12, attributes: { attack: 80, defense: 50, agility: 75, dodge: 35, faint: 15, sleep: 10, miss: 20, hyperCharge: 40 }}
+                    ].map((opponent, index) => (
+                      <PokemonCard
+                        key={index}
+                        pokemon={opponent}
+                        onSelect={() => {}}
+                        isSelected={false}
+                        showBattle={true}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Battle Result */}
+                {battleResult && (
+                  <div className="bg-black/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700">
+                    <h3 className="text-2xl font-bold mb-4 text-center">
+                      {battleResult.winner === 'pokemon1' ? (
+                        <span className="text-green-400">Victory!</span>
+                      ) : (
+                        <span className="text-red-400">Defeat!</span>
+                      )}
+                    </h3>
+                    
+                    <div className="grid md:grid-cols-2 gap-6">
+                      <div>
+                        <h4 className="text-lg font-bold mb-3">Battle Log</h4>
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                          {battleResult.battleLog.slice(-5).map((round, index) => (
+                            <div key={index} className="bg-gray-800 rounded-lg p-3 text-sm">
+                              <div className="flex justify-between">
+                                <span>You dealt {round.p1Damage} damage</span>
+                                <span>Enemy HP: {round.p2Hp}</span>
+                              </div>
+                              <div className="flex justify-between text-gray-400">
+                                <span>Enemy dealt {round.p2Damage} damage</span>
+                                <span>Your HP: {round.p1Hp}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <h4 className="text-
