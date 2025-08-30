@@ -17,29 +17,35 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
     
     // Pokemon struct to store attributes
     struct Pokemon {
+        uint32 hp;
         string name;
         uint8 attack;
         uint8 defense;
+        mapping (string=>uint32[]) moves;
         uint8 agility;
         address owner;
         uint256 wins;
         uint256 losses;
         uint256 createdAt;
+        // May need to add nft token id
+        // uint256 tokenId;
+        
     }
     
     // Battle struct to record battle history
     struct Battle {
-        uint256 attackerId;
-        uint256 defenderId;
-        address attacker;
-        address defender;
-        bool attackerWon;
+        address Player1;
+        address Player2;
+        uint256 Player2Id;
+        uint256 pokemon2Id;
+        address winner_owner;
+        uint256 winner_mon;
         uint256 timestamp;
     }
     
     // Mappings
-    mapping(uint256 => Pokemon) public pokemon;
-    mapping(address => uint256[]) public ownerToPokemon;
+    mapping(uint256 => Pokemon) public pokemon; //PlayerId -> Pokemon
+    mapping(address => uint256[]) public ownerToPokemon; //wallet address -> nft id
     mapping(uint256 => bool) public pokemonExists;
     
     // Battle tracking
@@ -66,15 +72,16 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
      */
     function createPokemon(
         string memory _name,
+        mapping (string=>uint32[]) _moves,
         uint8 _attack,
         uint8 _defense,
         uint8 _agility
     ) external payable nonReentrant returns (uint256) {
         require(msg.value >= creationFee, "Insufficient creation fee");
         require(bytes(_name).length > 0 && bytes(_name).length <= 20, "Invalid name length");
-        require(_attack >= 1 && _attack <= 100, "Attack must be between 1-100");
-        require(_defense >= 1 && _defense <= 100, "Defense must be between 1-100");
-        require(_agility >= 1 && _agility <= 100, "Agility must be between 1-100");
+        // require(_attack >= 1 && _attack <= 100, "Attack must be between 1-100");
+        // require(_defense >= 1 && _defense <= 100, "Defense must be between 1-100");
+        // require(_agility >= 1 && _agility <= 100, "Agility must be between 1-100");
         
         _tokenIds.increment();
         uint256 newTokenId = _tokenIds.current();
@@ -85,13 +92,16 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
         // Create Pokemon with stats
         pokemon[newTokenId] = Pokemon({
             name: _name,
+            hp: 20,
             attack: _attack,
             defense: _defense,
             agility: _agility,
             owner: msg.sender,
             wins: 0,
             losses: 0,
-            createdAt: block.timestamp
+            createdAt: block.timestamp,
+            moves: _moves
+            
         });
         
         // Update ownership mapping
@@ -107,95 +117,80 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
      * @param _attackerId ID of attacking Pokemon
      * @param _defenderId ID of defending Pokemon
      */
-    function battle(uint256 _attackerId, uint256 _defenderId) 
-        external 
-        nonReentrant 
-        returns (bool) 
-    {
-        require(pokemonExists[_attackerId], "Attacker Pokemon doesn't exist");
-        require(pokemonExists[_defenderId], "Defender Pokemon doesn't exist");
-        require(ownerOf(_attackerId) == msg.sender, "You don't own the attacking Pokemon");
-        require(ownerOf(_defenderId) != msg.sender, "Cannot battle your own Pokemon");
-        
-        Pokemon storage attacker = pokemon[_attackerId];
-        Pokemon storage defender = pokemon[_defenderId];
-        
-        // Battle algorithm: combination of stats with some randomness
-        uint256 attackerPower = calculateBattlePower(_attackerId, true);
-        uint256 defenderPower = calculateBattlePower(_defenderId, false);
-        
-        bool attackerWon = attackerPower > defenderPower;
-        
-        // Update battle records
-        if (attackerWon) {
-            attacker.wins++;
-            defender.losses++;
-            
-            // Reward winner
-            if (address(this).balance >= battleReward) {
-                payable(msg.sender).transfer(battleReward);
-                emit RewardClaimed(msg.sender, battleReward);
-            }
-        } else {
-            attacker.losses++;
-            defender.wins++;
-            
-            // Reward defender owner
-            address defenderOwner = ownerOf(_defenderId);
-            if (address(this).balance >= battleReward) {
-                payable(defenderOwner).transfer(battleReward);
-                emit RewardClaimed(defenderOwner, battleReward);
-            }
-        }
-        
-        // Record battle
-        battles.push(Battle({
-            attackerId: _attackerId,
-            defenderId: _defenderId,
-            attacker: msg.sender,
-            defender: ownerOf(_defenderId),
-            attackerWon: attackerWon,
-            timestamp: block.timestamp
-        }));
-        
-        battleCount++;
-        
-        emit BattleCompleted(_attackerId, _defenderId, attackerWon);
-        return attackerWon;
+
+    function battle(
+    uint256 pokemon1Id,
+    uint256 pokemon2Id,
+    string memory player1Move,
+    string memory player2Move
+) 
+    external
+    nonReentrant
+    returns (string memory)
+{
+    require(pokemonExists[pokemon1Id], "Pokemon1 doesn't exist");
+    require(pokemonExists[pokemon2Id], "Pokemon2 doesn't exist");
+
+    Pokemon storage p1 = pokemon[pokemon1Id];
+    Pokemon storage p2 = pokemon[pokemon2Id];
+
+    require(p1.moves[player1Move] || keccak256(abi.encodePacked(player1Move)) == keccak256("defend"), "Invalid move");
+    require(p2.moves[player2Move] || keccak256(abi.encodePacked(player2Move)) == keccak256("defend"), "Invalid move");
+
+    if (
+        keccak256(abi.encodePacked(player1Move)) == keccak256("defend") &&
+        keccak256(abi.encodePacked(player2Move)) == keccak256("defend")
+    ) {
+        return "both defended";
     }
-    
-    /**
-     * @dev Calculate battle power for a Pokemon
-     * @param _pokemonId ID of the Pokemon
-     * @param _isAttacker Whether this Pokemon is attacking or defending
-     */
-    function calculateBattlePower(uint256 _pokemonId, bool _isAttacker) 
-        internal 
-        view 
-        returns (uint256) 
-    {
-        Pokemon memory p = pokemon[_pokemonId];
-        
-        // Base power calculation
-        uint256 basePower;
-        if (_isAttacker) {
-            // Attackers get bonus from attack and agility
-            basePower = (uint256(p.attack) * 3) + (uint256(p.agility) * 2) + uint256(p.defense);
-        } else {
-            // Defenders get bonus from defense and some agility
-            basePower = (uint256(p.defense) * 3) + (uint256(p.attack) * 2) + uint256(p.agility);
-        }
-        
-        // Add some randomness based on block properties
-        uint256 randomFactor = uint256(keccak256(abi.encodePacked(
-            block.timestamp, 
-            block.difficulty, 
-            _pokemonId,
-            msg.sender
-        ))) % 50; // 0-49 random bonus
-        
-        return basePower + randomFactor;
+
+    Pokemon storage attacker;
+    Pokemon storage defender;
+
+    if (keccak256(abi.encodePacked(player1Move)) == keccak256("defend")) {
+        return "player1 defended";
+    } else if(keccak256(abi.encodePacked(player2Move)) == keccak256("defend")) {
+        return "player2 defended";
     }
+    if(p1.moves[player1Move][1] >= p2.moves[player2Move][1]) {
+        attacker = p1;
+        defender = p2;
+    } else{
+        attacker = p2;
+        defender = p1;
+    }
+
+    string memory result = calculateBattlePower(attacker, defender, player1Move);
+
+    if((keccak256(abi.encodePacked(result)) == keccak256("continue"))){
+        attacker = (attacker.owner == p1.owner) ? p2 : p1;
+        defender = (defender.owner == p1.owner) ? p2 : p1;
+
+    }
+    string memory result = calculateBattlePower(attacker, defender, player1Move);
+
+    if (keccak256(abi.encodePacked(result)) == keccak256("attacker won")) {
+        attacker.wins++;
+        defender.losses++;
+        emit BattleCompleted(pokemon1Id, pokemon2Id, attacker.owner == p1.owner);
+        return string.concat("winner is ", attacker.name);
+    }
+
+    return "continue";
+}
+
+function calculateBattlePower(
+    Pokemon storage attacker,
+    Pokemon storage defender,
+    string memory move
+) internal returns (string memory) {
+    defender.hp -= attacker.moves[move][0];
+    if (defender.hp <= 0) {
+        return "attacker won";
+    }
+    return "continue";
+}
+
     
     /**
      * @dev Get Pokemon details
