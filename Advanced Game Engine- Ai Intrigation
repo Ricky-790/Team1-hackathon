@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web3 Pokemon Game Engine</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.10.0/web3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.10.0/tf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            overflow-x: hidden;
+        }
+        
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        .header {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+        
+        .wallet-section {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+        
+        .btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .game-area {
+            display: flex;
+            flex: 1;
+        }
+        
+        .side-panel {
+            width: 300px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .pokemon-stats {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-bar {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            height: 20px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        
+        .stat-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        
+        .attack { background: linear-gradient(45deg, #ff4757, #ff3838); }
+        .defense { background: linear-gradient(45deg, #3742fa, #2f3542); }
+        .agility { background: linear-gradient(45deg, #2ed573, #1e90ff); }
+        
+        .ai-insights {
+            background: rgba(138, 43, 226, 0.2);
+            border-radius: 15px;
+            padding: 15px;
+            margin-top: 20px;
+            border: 2px solid rgba(138, 43, 226, 0.5);
+        }
+        
+        .game-canvas {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .battle-ui {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 15px;
+            display: none;
+            min-width: 400px;
+        }
+        
+        .battle-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        
+        .nft-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 500px;
+        }
+        
+        .pokemon-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 15px;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .pokemon-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <h1>🎮 Web3 Pokemon Engine</h1>
+            <div class="wallet-section">
+                <div id="walletStatus">Not Connected</div>
+                <button class="btn" id="connectWallet">Connect Wallet</button>
+                <button class="btn" id="mintNFT" disabled>Mint Pokemon NFT</button>
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <div class="side-panel">
+                <h3>🔥 Current Pokemon</h3>
+                <div class="pokemon-stats" id="pokemonStats">
+                    <h4 id="pokemonName">Select a Pokemon</h4>
+                    <div>
+                        <label>Attack: <span id="attackValue">0</span></label>
+                        <div class="stat-bar">
+                            <div class="stat-fill attack" id="attackBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Defense: <span id="defenseValue">0</span></label>
+                        <div class="stat-bar">
+                            <div class="stat-fill defense" id="defenseBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Agility: <span id="agilityValue">0</span></label>
+                        <div class="stat-bar">
+                            <div class="stat-fill agility" id="agilityBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <h3>🎯 Available Pokemon</h3>
+                <div id="pokemonList"></div>
+                
+                <div class="ai-insights">
+                    <h4>🤖 AI Battle Insights</h4>
+                    <div id="aiPredictions">
+                        <p>AI analyzing battle patterns...</p>
+                        <div class="loading"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="game-canvas">
+                <div id="phaserGame"></div>
+            </div>
+        </div>
+        
+        <div class="battle-ui" id="battleUI">
+            <h3>⚔️ Battle Mode</h3>
+            <p id="battleStatus">Choose your action!</p>
+            <div class="battle-actions">
+                <button class="btn" id="attackBtn">Attack</button>
+                <button class="btn" id="defendBtn">Defend</button>
+                <button class="btn" id="escapeBtn">Escape</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="nft-modal" id="nftModal">
+        <div class="modal-content">
+            <h2>🎨 Mint Pokemon NFT</h2>
+            <div id="nftContent">
+                <p>Transform your Pokemon into a unique NFT!</p>
+                <div id="nftPreview"></div>
+                <button class="btn" id="confirmMint">Confirm Mint (0.01 ETH)</button>
+                <button class="btn" id="cancelMint" style="background: #666; margin-left: 10px;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Web3 and Blockchain Integration
+        class Web3Manager {
+            constructor() {
+                this.web3 = null;
+                this.account = null;
+                this.contract = null;
+                this.isConnected = false;
+            }
+            
+            async connectWallet() {
+                try {
+                    if (typeof window.ethereum !== 'undefined') {
+                        this.web3 = new Web3(window.ethereum);
+                        const accounts = await window.ethereum.request({ 
+                            method: 'eth_requestAccounts' 
+                        });
+                        this.account = accounts[0];
+                        this.isConnected = true;
+                        
+                        document.getElementById('walletStatus').textContent = 
+                            `Connected: ${this.account.substring(0, 6)}...${this.account.substring(38)}`;
+                        document.getElementById('connectWallet').textContent = 'Connected ✓';
+                        document.getElementById('mintNFT').disabled = false;
+                        
+                        // Initialize smart contract (mock contract address)
+                        this.initContract();
+                        
+                        console.log('Wallet connected:', this.account);
+                        return true;
+                    } else {
+                        alert('Please install MetaMask or another Web3 wallet!');
+                        return false;
+                    }
+                } catch (error) {
+                    console.error('Wallet connection failed:', error);
+                    alert('Failed to connect wallet: ' + error.message);
+                    return false;
+                }
+            }
+            
+            initContract() {
+                // Mock contract ABI and address (replace with actual contract)
+                const contractABI = [
+                    {
+                        "inputs": [{"type": "string", "name": "tokenURI"}],
+                        "name": "mintPokemon",
+                        "outputs": [{"type": "uint256"}],
+                        "type": "function"
+                    }
+                ];
+                const contractAddress = "0x1234567890123456789012345678901234567890"; // Mock address
+                
+                try {
+                    this.contract = new this.web3.eth.Contract(contractABI, contractAddress);
+                } catch (error) {
+                    console.log('Contract initialization skipped (demo mode)');
+                }
+            }
+            
+            async mintPokemonNFT(pokemonData) {
+                if (!this.isConnected) {
+                    alert('Please connect your wallet first!');
+                    return false;
+                }
+                
+                try {
+                    // Mock NFT minting process
+                    console.log('Minting NFT for Pokemon:', pokemonData);
+                    
+                    // Simulate blockchain transaction
+                    const mockTxHash = '0x' + Math.random().toString(16).substring(2, 66);
+                    
+                    // Show loading state
+                    const mintBtn = document.getElementById('confirmMint');
+                    mintBtn.innerHTML = '<div class="loading"></div> Minting...';
+                    mintBtn.disabled = true;
+                    
+                    // Simulate network delay
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    
+                    // Success simulation
+                    alert(`NFT Minted Successfully!\nTransaction Hash: ${mockTxHash}\nToken ID: ${Math.floor(Math.random() * 10000)}`);
+                    
+                    // Reset button
+                    mintBtn.textContent = 'Confirm Mint (0.01 ETH)';
+                    mintBtn.disabled = false;
+                    
+                    // Close modal
+                    document.getElementById('nftModal').style.display = 'none';
+                    
+                    return true;
+                } catch (error) {
+                    console.error('NFT minting failed:', error);
+                    alert('NFT minting failed: ' + error.message);
+                    return false;
+                }
+            }
+        }
+
+        // AI/ML Integration for Game Enhancement
+        class AIGameEngine {
+            constructor() {
+                this.model = null;
+                this.playerData = {
+                    battles: [],
+                    preferences: {},
+                    performance: {}
+                };
+                this.initializeAI();
+            }
+            
+            async initializeAI() {
+                try {
+                    // Create a simple neural network for battle prediction
+                    this.model = tf.sequential({
+                        layers: [
+                            tf.layers.dense({inputShape: [9], units: 16, activation: 'relu'}),
+                            tf.layers.dense({units: 8, activation: 'relu'}),
+                            tf.layers.dense({units: 3, activation: 'softmax'}) // Attack, Defend, Escape
+                        ]
+                    });
+                    
+                    this.model.compile({
+                        optimizer: 'adam',
+                        loss: 'categoricalCrossentropy',
+                        metrics: ['accuracy']
+                    });
+                    
+                    console.log('AI Engine initialized successfully');
+                    this.updateAIInsights('AI Engine Ready! Analyzing battle patterns...');
+                } catch (error) {
+                    console.error('AI initialization failed:', error);
+                    this.updateAIInsights('AI Engine offline - using basic predictions');
+                }
+            }
+            
+            recordPlayerAction(battleState, action, outcome) {
+                const dataPoint = {
+                    playerAttack: battleState.player.attack,
+                    playerDefense: battleState.player.defense,
+                    playerAgility: battleState.player.agility,
+                    enemyAttack: battleState.enemy.attack,
+                    enemyDefense: battleState.enemy.defense,
+                    enemyAgility: battleState.enemy.agility,
+                    playerHP: battleState.player.hp,
+                    enemyHP: battleState.enemy.hp,
+                    turnNumber: battleState.turn,
+                    action: action, // 0: attack, 1: defend, 2: escape
+                    outcome: outcome // 0: loss, 1: win, 2: draw
+                };
+                
+                this.playerData.battles.push(dataPoint);
+                
+                // Train model with new data if we have enough samples
+                if (this.playerData.battles.length > 10 && this.playerData.battles.length % 5 === 0) {
+                    this.trainModel();
+                }
+            }
+            
+            async trainModel() {
+                if (!this.model || this.playerData.battles.length < 10) return;
+                
+                try {
+                    const trainingData = this.playerData.battles.map(battle => [
+                        battle.playerAttack / 100, battle.playerDefense / 100, battle.playerAgility / 100,
+                        battle.enemyAttack / 100, battle.enemyDefense / 100, battle.enemyAgility / 100,
+                        battle.playerHP / 100, battle.enemyHP / 100, battle.turnNumber / 20
+                    ]);
+                    
+                    const labels = this.playerData.battles.map(battle => {
+                        const label = [0, 0, 0];
+                        label[battle.action] = 1;
+                        return label;
+                    });
+                    
+                    const xs = tf.tensor2d(trainingData);
+                    const ys = tf.tensor2d(labels);
+                    
+                    await this.model.fit(xs, ys, {
+                        epochs: 10,
+                        batchSize: 32,
+                        verbose: 0
+                    });
+                    
+                    xs.dispose();
+                    ys.dispose();
+                    
+                    console.log('AI model retrained with', this.playerData.battles.length, 'battles');
+                    this.updateAIInsights('AI learned from your battles! Predictions improving...');
+                } catch (error) {
+                    console.error('Model training failed:', error);
+                }
+            }
+            
+            async predictBestAction(battleState) {
+                if (!this.model) {
+                    return this.fallbackPrediction(battleState);
+                }
+                
+                try {
+                    const input = tf.tensor2d([[
+                        battleState.player.attack / 100, battleState.player.defense / 100, battleState.player.agility / 100,
+                        battleState.enemy.attack / 100, battleState.enemy.defense / 100, battleState.enemy.agility / 100,
+                        battleState.player.hp / 100, battleState.enemy.hp / 100, battleState.turn / 20
+                    ]]);
+                    
+                    const prediction = this.model.predict(input);
+                    const probabilities = await prediction.data();
+                    
+                    input.dispose();
+                    prediction.dispose();
+                    
+                    const actions = ['Attack', 'Defend', 'Escape'];
+                    const bestActionIndex = probabilities.indexOf(Math.max(...probabilities));
+                    const confidence = Math.round(probabilities[bestActionIndex] * 100);
+                    
+                    const insight = `AI Recommendation: ${actions[bestActionIndex]} (${confidence}% confidence)`;
+                    this.updateAIInsights(insight);
+                    
+                    return bestActionIndex;
+                } catch (error) {
+                    console.error('AI prediction failed:', error);
+                    return this.fallbackPrediction(battleState);
+                }
+            }
+            
+            fallbackPrediction(battleState) {
+                // Simple rule-based fallback
+                const playerPower = battleState.player.attack + battleState.player.defense + battleState.player.agility;
+                const enemyPower = battleState.enemy.attack + battleState.enemy.defense + battleState.enemy.agility;
+                
+                if (playerPower > enemyPower * 1.2) {
+                    this.updateAIInsights('Recommendation: Attack! You have the advantage.');
+                    return 0;
+                } else if (enemyPower > playerPower * 1.2) {
+                    this.updateAIInsights('Recommendation: Defend or Escape! Enemy is stronger.');
+                    return battleState.player.hp < 30 ? 2 : 1;
+                } else {
+                    this.updateAIInsights('Recommendation: Balanced fight - Attack recommended.');
+                    return 0;
+                }
+            }
+            
+            updateAIInsights(message) {
+                const insightsDiv = document.getElementById('aiPredictions');
+                insightsDiv.innerHTML = `<p>${message}</p>`;
+            }
+            
+            analyzePlayerBehavior() {
+                if (this.playerData.battles.length < 5) return;
+                
+                const actionCounts = [0, 0, 0];
+                this.playerData.battles.forEach(battle => {
+                    actionCounts[battle.action]++;
+                });
+                
+                const totalActions = actionCounts.reduce((a, b) => a + b, 0);
+                const preferences = actionCounts.map(count => Math.round((count / totalActions) * 100));
+                
+                const analysis = `Play Style: ${preferences[0]}% Aggressive, ${preferences[1]}% Defensive, ${preferences[2]}% Cautious`;
+                this.updateAIInsights(analysis);
+            }
+        }
+
+        // Pokemon Game Logic
+        class Pokemon {
+            constructor(name, attack, defense, agility, sprite) {
+                this.name = name;
+                this.attack = attack;
+                this.defense = defense;
+                this.agility = agility;
+                this.hp = 100;
+                this.maxHP = 100;
+                this.sprite = sprite;
+                this.id = Math.random().toString(36).substr(2, 9);
+            }
+            
+            takeDamage(damage) {
+                const actualDamage = Math.max(1, damage - (this.defense / 4));
+                this.hp = Math.max(0, this.hp - actualDamage);
+                return actualDamage;
+            }
+            
+            heal(amount) {
+                this.hp = Math.min(this.maxHP, this.hp + amount);
+            }
+            
+            isAlive() {
+                return this.hp > 0;
+            }
+        }
+
+        // Main Game Engine
+        class PokemonGameEngine {
+            constructor() {
+                this.web3Manager = new Web3Manager();
+                this.aiEngine = new AIGameEngine();
+                this.currentPokemon = null;
+                this.pokemonList = [];
+                this.gameScene = null;
+                this.battleState = null;
+                
+                this.initializePokemon();
+                this.initializePhaserGame();
+                this.setupEventListeners();
+            }
+            
+            initializePokemon() {
+                // Create initial Pokemon roster
+                this.pokemonList = [
+                    new Pokemon('Firedrake', 85, 60, 75, '🔥'),
+                    new Pokemon('Aquastorm', 70, 80, 65, '🌊'),
+                    new Pokemon('Voltstriker', 90, 55, 85, '⚡'),
+                    new Pokemon('Earthguard', 75, 90, 50, '🌍'),
+                    new Pokemon('Windwhisper', 65, 65, 95, '💨'),
+                    new Pokemon('Shadowbeast', 80, 70, 80, '🌙')
+                ];
+                
+                this.currentPokemon = this.pokemonList[0];
+                this.updatePokemonDisplay();
+                this.renderPokemonList();
+            }
+            
+            initializePhaserGame() {
+                const config = {
+                    type: Phaser.AUTO,
+                    width: 800,
+                    height: 600,
+                    parent: 'phaserGame',
+                    backgroundColor: '#2c3e50',
+                    scene: {
+                        preload: this.preload.bind(this),
+                        create: this.create.bind(this),
+                        update: this.update.bind(this)
+                    },
+                    physics: {
+                        default: 'arcade',
+                        arcade: {
+                            gravity: { y: 0 },
+                            debug: false
+                        }
+                    }
+                };
+                
+                this.game = new Phaser.Game(config);
+            }
+            
+            preload() {
+                // Create colored rectangles as sprites
+                this.load.image('player', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+            }
+            
+            create() {
+                this.gameScene = this;
+                
+                // Create game world
+                this.add.rectangle(400, 300, 800, 600, 0x34495e);
+                
+                // Create player sprite
+                this.playerSprite = this.add.rectangle(150, 300, 80, 80, 0xe74c3c);
+                this.playerSprite.setStrokeStyle(4, 0xffffff);
+                
+                // Create enemy sprites (scattered around)
+                this.enemies = [];
+                for (let i = 0; i < 5; i++) {
+                    const enemy = this.add.rectangle(
+                        300 + Math.random() * 400,
+                        100 + Math.random() * 400,
+                        60, 60, 0x8e44ad
+                    );
+                    enemy.setStrokeStyle(2, 0xffffff);
+                    enemy.setInteractive();
+                    enemy.on('pointerdown', () => this.startBattle(i));
+                    this.enemies.push(enemy);
+                }
+                
+                // Add UI text
+                this.add.text(20, 20, 'Click on purple enemies to battle!', {
+                    fontSize: '18px',
+                    fill: '#ffffff'
+                });
+                
+                // Create floating particles
+                this.particles = this.add.particles(0, 0, 'player', {
+                    speed: { min: 50, max: 100 },
+                    scale: { start: 0.3, end: 0 },
+                    blendMode: 'ADD',
+                    tint: [0x3498db, 0xe74c3c, 0xf39c12, 0x2ecc71]
+                });
+                
+                // Player controls
+                this.cursors = this.input.keyboard.createCursorKeys();
+            }
+            
+            update() {
+                // Player movement
+                const speed = 200;
+                
+                if (this.cursors.left.isDown) {
+                    this.playerSprite.x = Math.max(40, this.playerSprite.x - speed * (1/60));
+                }
+                if (this.cursors.right.isDown) {
+                    this.playerSprite.x = Math.min(760, this.playerSprite.x + speed * (1/60));
+                }
+                if (this.cursors.up.isDown) {
+                    this.playerSprite.y = Math.max(40, this.playerSprite.y - speed * (1/60));
+                }
+                if (this.cursors.down.isDown) {
+                    this.playerSprite.y = Math.min(560, this.playerSprite.y + speed * (1/60));
+                }
+                
+                // Particle effects follow player
+                this.particles.setPosition(this.playerSprite.x, this.playerSprite.y);
+            }
+            
+            startBattle(enemyIndex) {
+                if (this.battleState) return; // Battle already active
+                
+                const enemyPokemon = new Pokemon(
+                    'Wild ' + ['Grimfang', 'Stormshard', 'Blazeclaw', 'Frostbite', 'Venomstrike'][enemyIndex],
+                    60 + Math.random() * 40,
+                    50 + Math.random() * 40,
+                    55 + Math.random() * 40,
+                    '👹'
+                );
+                
+                this.battleState = {
+                    player: { ...this.currentPokemon },
+                    enemy: enemyPokemon,
+                    turn: 1,
+                    isPlayerTurn: true
+                };
+                
+                document.getElementById('battleUI').style.display = 'block';
+                this.updateBattleUI();
+                
+                // AI analysis
+                this.aiEngine.predictBestAction(this.battleState);
+            }
+            
+            performBattleAction(action) {
+                if (!this.battleState || !this.battleState.isPlayerTurn) return;
+                
+                const { player, enemy } = this.battleState;
+                let battleResult = null;
+                
+                // Player action
+                switch (action) {
+                    case 0: // Attack
+                        const damage = Math.max(1, player.attack - enemy.defense/2 + Math.random() * 20);
+                        enemy.hp = Math.max(0, enemy.hp - damage);
+                        this.updateBattleStatus(`${player.name} attacks for ${Math.round(damage)} damage!`);
+                        break;
+                    case 1: // Defend
+                        player.defense += 10; // Temporary boost
+                        this.updateBattleStatus(`${player.name} defends and raises defense!`);
+                        break;
+                    case 2: // Escape
+                        if (Math.random() < 0.7) {
+                            this.endBattle('escaped');
+                            return;
+                        } else {
+                            this.updateBattleStatus(`Couldn't escape!`);
+                        }
+                        break;
+                }
+                
+                // Check if enemy is defeated
+                if (enemy.hp <= 0) {
+                    battleResult = 'victory';
+                    this.endBattle(battleResult);
+                    return;
+                }
+                
+                // Enemy turn
+                setTimeout(() => {
+                    const enemyDamage = Math.max(1, enemy.attack - player.defense/2 + Math.random() * 15);
+                    player.hp = Math.max(0, player.hp - enemyDamage);
+                    this.updateBattleStatus(`${enemy.name} attacks for ${Math.round(enemyDamage)} damage!`);
+                    
+                    if (player.hp <= 0) {
+                        battleResult = 'defeat';
+                        this.endBattle(battleResult);
+                        return;
+                    }
+                    
+                    this.battleState.turn++;
+                    this.updateBattleUI();
+                    
+                    // AI learning - record the action and its outcome
+                    const outcome = battleResult === 'victory' ? 1 : (battleResult === 'defeat' ? 0 : 2);
+                    this.aiEngine.recordPlayerAction(this.battleState, action, outcome);
+                }, 1000);
+            }
+            
+            endBattle(result) {
+                let message = '';
+                switch (result) {
+                    case 'victory':
+                        message = '🎉 Victory! Your Pokemon gained experience!';
+                        this.currentPokemon.attack += Math.floor(Math.random() * 3) + 1;
+                        this.currentPokemon.defense += Math.floor(Math.random() * 3) + 1;
+                        this.currentPokemon.agility += Math.floor(Math.random() * 3) + 1;
+                        break;
+                    case 'defeat':
+                        message = '💀 Defeat! Your Pokemon needs healing.';
+                        this.currentPokemon.hp = Math.max(1, this.currentPokemon.hp);
+                        break;
+                    case 'escaped':
+                        message = '🏃 Successfully escaped from battle!';
+                        break;
+                }
+                
+                this.updateBattleStatus(message);
+                
+                setTimeout(() => {
+                    document.getElementById('battleUI').style.display = 'none';
+                    this.battleState = null;
+                    this.updatePokemonDisplay();
+                    this.aiEngine.analyzePlayerBehavior();
+                }, 2000);
+            }
+            
+            updateBattleUI() {
+                if (!this.battleState) return;
+                
+                const status = `Turn ${this.battleState.turn} | ${this.battleState.player.name} (${this.battleState.player.hp}HP) vs ${this.battleState.enemy.name} (${this.battleState.enemy.hp}HP)`;
+                document.getElementById('battleStatus').textContent = status;
+            }
+            
+            updateBattleStatus(message) {
+                document.getElementById('battleStatus').textContent = message;
+            }
+            
+            updatePokemonDisplay() {
+                if (!this.currentPokemon) return;
+                
+                document.getElementById('pokemonName').textContent = 
+                    `${this.currentPokemon.sprite} ${this.currentPokemon.name} (HP: ${this.currentPokemon.hp}/${this.currentPokemon.maxHP})`;
+                
+                // Update stat bars
+                const maxStat = 120; // Maximum possible stat for scaling
+                document.getElementById('attackValue').textContent = this.currentPokemon.attack;
+                document.getElementById('defenseValue').textContent = this.currentPokemon.defense;
+                document.getElementById('agilityValue').textContent = this.currentPokemon.agility;
+                
+                document.getElementById('attackBar').style.width = `${(this.currentPokemon.attack / maxStat) * 100}%`;
+                document.getElementById('defenseBar').style.width = `${(this.currentPokemon.defense / maxStat) * 100}%`;
+                document.getElementById('agilityBar').style.width = `${(this.currentPokemon.agility / maxStat) * 100}%`;
+            }
+            
+            renderPokemonList() {
+                const listContainer = document.getElementById('pokemonList');
+                listContainer.innerHTML = '';
+                
+                this.pokemonList.forEach((pokemon, index) => {
+                    const pokemonCard = document.createElement('div');
+                    pokemonCard.className = 'pokemon-card';
+                    pokemonCard.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>${pokemon.sprite} ${pokemon.name}</span>
+                            <span style="font-size: 0.8em;">${pokemon.hp}/${pokemon.maxHP} HP</span>
+                        </div>
+                        <div style="font-size: 0.7em; color: #bbb; margin-top: 5px;">
+                            ATK: ${pokemon.attack} | DEF: ${pokemon.defense} | AGI: ${pokemon.agility}
+                        </div>
+                    `;
+                    
+                    pokemonCard.addEventListener('click', () => {
+                        this.currentPokemon = pokemon;
+                        this.updatePokemonDisplay();
+                        
+                        // Highlight selected pokemon
+                        document.querySelectorAll('.pokemon-card').forEach(card => {
+                            card.style.background = 'rgba(255, 255, 255, 0.1)';
+                        });
+                        pokemonCard.style.background = 'rgba(255, 255, 255, 0.3)';
+                    });
+                    
+                    if (pokemon === this.currentPokemon) {
+                        pokemonCard.style.background = 'rgba(255, 255, 255, 0.3)';
+                    }
+                    
+                    listContainer.appendChild(pokemonCard);
+                });
+            }
+            
+            setupEventListeners() {
+                // Wallet connection
+                document.getElementById('connectWallet').addEventListener('click', async () => {
+                    await this.web3Manager.connectWallet();
+                });
+                
+                // NFT minting
+                document.getElementById('mintNFT').addEventListener('click', () => {
+                    if (!this.currentPokemon) {
+                        alert('Please select a Pokemon first!');
+                        return;
+                    }
+                    this.showNFTModal();
+                });
+                
+                // Battle actions
+                document.getElementById('attackBtn').addEventListener('click', () => {
+                    this.performBattleAction(0);
+                });
+                
+                document.getElementById('defendBtn').addEventListener('click', () => {
+                    this.performBattleAction(1);
+                });
+                
+                document.getElementById('escapeBtn').addEventListener('click', () => {
+                    this.performBattleAction(2);
+                });
+                
+                // NFT modal actions
+                document.getElementById('confirmMint').addEventListener('click', async () => {
+                    const pokemonData = {
+                        name: this.currentPokemon.name,
+                        attack: this.currentPokemon.attack,
+                        defense: this.currentPokemon.defense,
+                        agility: this.currentPokemon.agility,
+                        sprite: this.currentPokemon.sprite,
+                        id: this.currentPokemon.id
+                    };
+                    
+                    await this.web3Manager.mintPokemonNFT(pokemonData);
+                });
+                
+                document.getElementById('cancelMint').addEventListener('click', () => {
+                    document.getElementById('nftModal').style.display = 'none';
+                });
+                
+                // Close modal on background click
+                document.getElementById('nftModal').addEventListener('click', (e) => {
+                    if (e.target.id === 'nftModal') {
+                        document.getElementById('nftModal').style.display = 'none';
+                    }
+                });
+                
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    if (this.battleState && this.battleState.isPlayerTurn) {
+                        switch (e.key) {
+                            case '1':
+                                this.performBattleAction(0); // Attack
+                                break;
+                            case '2':
+                                this.performBattleAction(1); // Defend
+                                break;
+                            case '3':
+                                this.performBattleAction(2); // Escape
+                                break;
+                        }
+                    }
+                });
+            }
+            
+            showNFTModal() {
+                const modal = document.getElementById('nftModal');
+                const preview = document.getElementById('nftPreview');
+                
+                preview.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                border-radius: 15px; padding: 20px; margin: 20px 0; 
+                                border: 3px solid #fff;">
+                        <h3>${this.currentPokemon.sprite} ${this.currentPokemon.name}</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
+                            <div>Attack: ${this.currentPokemon.attack}</div>
+                            <div>Defense: ${this.currentPokemon.defense}</div>
+                            <div>Agility: ${this.currentPokemon.agility}</div>
+                            <div>HP: ${this.currentPokemon.hp}/${this.currentPokemon.maxHP}</div>
+                        </div>
+                        <div style="margin-top: 15px; font-size: 0.8em; color: #ddd;">
+                            Unique ID: ${this.currentPokemon.id}
+                        </div>
+                    </div>
+                `;
+                
+                modal.style.display = 'flex';
+            }
+            
+            // Advanced AI Features
+            async generateDynamicContent() {
+                // AI-generated pokemon based on player behavior
+                if (this.aiEngine.playerData.battles.length > 20) {
+                    const playerStyle = this.analyzePlayerStyle();
+                    const newPokemon = this.generateAdaptivePokemon(playerStyle);
+                    this.pokemonList.push(newPokemon);
+                    this.renderPokemonList();
+                    
+                    this.aiEngine.updateAIInsights(`New Pokemon discovered: ${newPokemon.name}! Tailored to your play style.`);
+                }
+            }
+            
+            analyzePlayerStyle() {
+                const battles = this.aiEngine.playerData.battles;
+                const avgAttackActions = battles.filter(b => b.action === 0).length / battles.length;
+                const avgDefenseActions = battles.filter(b => b.action === 1).length / battles.length;
+                const avgEscapeActions = battles.filter(b => b.action === 2).length / battles.length;
+                
+                return {
+                    aggressive: avgAttackActions,
+                    defensive: avgDefenseActions,
+                    cautious: avgEscapeActions
+                };
+            }
+            
+            generateAdaptivePokemon(playerStyle) {
+                const names = ['Adaptron', 'Stylemon', 'Playermon', 'Customite', 'Behavion'];
+                const name = names[Math.floor(Math.random() * names.length)];
+                
+                // Generate stats based on player preferences
+                const baseAttack = 60 + (playerStyle.aggressive * 40);
+                const baseDefense = 60 + (playerStyle.defensive * 40);
+                const baseAgility = 60 + (playerStyle.cautious * 40);
+                
+                return new Pokemon(name, baseAttack, baseDefense, baseAgility, '🤖');
+            }
+            
+            // Performance monitoring and optimization
+            startPerformanceMonitoring() {
+                setInterval(() => {
+                    const fps = this.game ? this.game.loop.actualFps : 0;
+                    const memoryUsage = performance.memory ? 
+                        Math.round(performance.memory.usedJSHeapSize / 1048576) : 0;
+                    
+                    if (fps < 30 || memoryUsage > 100) {
+                        this.optimizePerformance();
+                    }
+                }, 5000);
+            }
+            
+            optimizePerformance() {
+                // Reduce particle effects if performance is low
+                if (this.gameScene && this.gameScene.particles) {
+                    this.gameScene.particles.setQuantity(Math.max(1, 
+                        Math.floor(this.gameScene.particles.quantity.value / 2)));
+                }
+                
+                // Cleanup unused textures
+                if (this.game) {
+                    this.game.textures.each((texture) => {
+                        if (!texture.source[0].image.complete) {
+                            this.game.textures.remove(texture.key);
+                        }
+                    });
+                }
+                
+                console.log('Performance optimization applied');
+            }
+            
+            // Save/Load system (using memory since localStorage is not available)
+            saveGameState() {
+                const gameState = {
+                    pokemonList: this.pokemonList,
+                    currentPokemon: this.currentPokemon,
+                    playerData: this.aiEngine.playerData,
+                    timestamp: Date.now()
+                };
+                
+                // In a real application, this would be saved to blockchain or IPFS
+                window.gameState = gameState;
+                console.log('Game state saved to memory');
+            }
+            
+            loadGameState() {
+                if (window.gameState) {
+                    const state = window.gameState;
+                    this.pokemonList = state.pokemonList.map(p => 
+                        Object.assign(new Pokemon(), p));
+                    this.currentPokemon = state.currentPokemon ? 
+                        Object.assign(new Pokemon(), state.currentPokemon) : this.pokemonList[0];
+                    this.aiEngine.playerData = state.playerData || this.aiEngine.playerData;
+                    
+                    this.updatePokemonDisplay();
+                    this.renderPokemonList();
+                    console.log('Game state loaded from memory');
+                }
+            }
+        }
+
+        // Smart Contract Integration (Solidity Backend Mock)
+        const solidityContractMock = {
+            // Mock contract methods that would interact with actual Solidity contract
+            createPokemon: async function(name, attack, defense, agility) {
+                return {
+                    tokenId: Math.floor(Math.random() * 10000),
+                    owner: window.ethereum?.selectedAddress || "0x0000",
+                    metadata: {
+                        name, attack, defense, agility,
+                        timestamp: Date.now()
+                    }
+                };
+            },
+            
+            battlePokemon: async function(pokemon1Id, pokemon2Id) {
+                // Simulate on-chain battle logic
+                return {
+                    winner: Math.random() > 0.5 ? pokemon1Id : pokemon2Id,
+                    battleHash: '0x' + Math.random().toString(16).substring(2),
+                    rewards: Math.floor(Math.random() * 100) + 50
+                };
+            },
+            
+            transferPokemon: async function(from, to, tokenId) {
+                return {
+                    success: true,
+                    transactionHash: '0x' + Math.random().toString(16).substring(2, 66)
+                };
+            }
+        };
+
+        // Initialize the game engine
+        let gameEngine;
+        
+        window.addEventListener('load', () => {
+            gameEngine = new PokemonGameEngine();
+            
+            // Auto-save every 30 seconds
+            setInterval(() => {
+                gameEngine.saveGameState();
+            }, 30000);
+            
+            // Load existing game state
+            gameEngine.loadGameState();
+            
+            // Start performance monitoring
+            gameEngine.startPerformanceMonitoring();
+            
+            // Generate dynamic content periodically
+            setInterval(() => {
+                gameEngine.generateDynamicContent();
+            }, 60000);
+            
+            console.log('🎮 Web3 Pokemon Game Engine Initialized!');
+            console.log('🧠 AI/ML Integration Active');
+            console.log('⛓️  Blockchain Integration Ready');
+            console.log('🎨 NFT Minting Available');
+            console.log('🕹️  Phaser.js Game Engine Running');
+        });
+
+        // Advanced AI Features for Real-time Adaptation
+        class AdvancedAIFeatures {
+            static async implementReinforcementLearning(gameEngine) {
+                // Q-Learning implementation for battle strategy
+                const qTable = {};
+                const learningRate = 0.1;
+                const discountFactor = 0.9;
+                const explorationRate = 0.1;
+                
+                return {
+                    getOptimalAction: function(state) {
+                        const stateKey = JSON.stringify(state);
+                        if (!qTable[stateKey] || Math.random() < explorationRate) {
+                            return Math.floor(Math.random() * 3); // Explore
+                        }
+                        
+                        const qValues = qTable[stateKey];
+                        return qValues.indexOf(Math.max(...qValues)); // Exploit
+                    },
+                    
+                    updateQTable: function(state, action, reward, nextState) {
+                        const stateKey = JSON.stringify(state);
+                        const nextStateKey = JSON.stringify(nextState);
+                        
+                        if (!qTable[stateKey]) {
+                            qTable[stateKey] = [0, 0, 0];
+                        }
+                        
+                        const maxNextQ = qTable[nextStateKey] ? 
+                            Math.max(...qTable[nextStateKey]) : 0;
+                        
+                        const currentQ = qTable[stateKey][action];
+                        const newQ = currentQ + learningRate * 
+                            (reward + discountFactor * maxNextQ - currentQ);
+                        
+                        qTable[stateKey][action] = newQ;
+                    }
+                };
+            },
+            
+            static implementNeuralEvolution(pokemonList) {
+                // Genetic algorithm for Pokemon evolution
+                return {
+                    evolvePokemon: function(pokemon, generation = 1) {
+                        const evolutionBonus = generation * 5;
+                        return new Pokemon(
+                            pokemon.name + ` Gen${generation}`,
+                            pokemon.attack + Math.random() * evolutionBonus,
+                            pokemon.defense + Math.random() * evolutionBonus,
+                            pokemon.agility + Math.random() * evolutionBonus,
+                            pokemon.sprite
+                        );
+                    },
+                    
+                    breedPokemon: function(parent1, parent2) {
+                        const childStats = {
+                            attack: (parent1.attack + parent2.attack) / 2 + 
+                                (Math.random() - 0.5) * 20,
+                            defense: (parent1.defense + parent2.defense) / 2 + 
+                                (Math.random() - 0.5) * 20,
+                            agility: (parent1.agility + parent2.agility) / 2 + 
+                                (Math.random() - 0.5) * 20
+                        };
+                        
+                        return new Pokemon(
+                            `Hybrid-${Math.random().toString(36).substr(2, 4)}`,
+                            Math.max(1, childStats.attack),
+                            Math.max(1, childStats.defense),
+                            Math.max(1, childStats.agility),
+                            '🧬'
+                        );
+                    }
+                };
+            }
+        }
+
+        // Export for external use
+        window.PokemonGameEngine = {
+            gameEngine: () => gameEngine,
+            solidityContract: solidityContractMock,
+            aiFeatures: AdvancedAIFeatures
+        };
+    </script>
+</body>
+</html>
