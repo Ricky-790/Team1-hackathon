@@ -19,7 +19,7 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
     struct Pokemon {
         uint32 hp;
         string name;
-        Move[2] moves; // Fixed-size array for gas efficiency
+        Move[5] moves; // Fixed-size array for gas efficiency
         address owner;
         uint256 wins;
         uint256 losses;
@@ -50,9 +50,45 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
     uint256 public battleReward = 0.005 ether;
 
     // Events
-    event PokemonCreated(uint256 indexed tokenId, string name, address indexed owner);
-    event BattleCompleted(uint256 indexed attackerId, uint256 indexed defenderId, bool attackerWon);
-    event RewardClaimed(address indexed player, uint256 amount);
+    // event PokemonCreated(uint256 indexed tokenId, string name, address indexed owner);
+    // event BattleCompleted(uint256 indexed attackerId, uint256 indexed defenderId, bool attackerWon);
+    // event RewardClaimed(address indexed player, uint256 amount);
+    event PokemonCreated(
+        uint256 indexed tokenId,
+        address indexed owner,
+        string name
+    );
+
+    event BattleStarted(
+        uint256 indexed battleId,
+        address indexed player1,
+        uint256 indexed pokemon1Id,
+        address player2,
+        uint256 pokemon2Id,
+        uint256 timestamp
+    );
+
+    event TurnResolved(
+        uint256 indexed battleId,
+        uint256 indexed pokemon1Id,
+        uint256 indexed pokemon2Id,
+        string move1,
+        string move2,
+        uint32 damageToP1,
+        uint32 damageToP2,
+        uint32 hp1After,
+        uint32 hp2After
+    );
+
+    event BattleEnded(
+        uint256 indexed battleId,
+        address indexed winnerOwner,
+        uint256 indexed winnerPokemonId,
+        address loserOwner,
+        uint256 loserPokemonId,
+        uint8 totalTurns,
+        uint256 timestamp
+    );
 
     constructor()
         ERC721("Pokemon Game", "POKEMON")
@@ -70,134 +106,260 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
         uint32 _move2agi
     ) external payable nonReentrant returns (uint256) {
         require(msg.value >= creationFee, "Insufficient creation fee");
-        require(bytes(_name).length > 0 && bytes(_name).length <= 20, "Invalid name length");
+        require(
+            bytes(_name).length > 0 && bytes(_name).length <= 20,
+            "Invalid name length"
+        );
 
         _tokenIds.increment();
         uint256 newTokenId = _tokenIds.current();
         _safeMint(msg.sender, newTokenId);
 
         pokemon[newTokenId] = Pokemon({
+            hp: 10,
             name: _name,
-            hp: 20,
+            moves: [
+                Move("defend", 0, 100),
+                Move(_move1, _move1atk, _move1agi),
+                Move(_move2, _move2atk, _move2agi),
+                Move("", 0, 0),
+                Move("", 0, 0)
+            ],
             owner: msg.sender,
             wins: 0,
             losses: 0,
-            createdAt: block.timestamp,
-            moves: [
-                Move(_move1, _move1atk, _move1agi),
-                Move(_move2, _move2atk, _move2agi)
-            ]
+            createdAt: block.timestamp
         });
 
         ownerToPokemon[msg.sender].push(newTokenId);
         pokemonExists[newTokenId] = true;
-        emit PokemonCreated(newTokenId, _name, msg.sender);
 
+        emit PokemonCreated(newTokenId, msg.sender, _name);
         return newTokenId;
     }
 
-    function battle(
-    uint256 pokemon1Id,
-    uint256 pokemon2Id,
-    uint8 player1MoveIndex, // 0 or 1
-    uint8 player2MoveIndex  // 0 or 1
-)
-    external
-    nonReentrant
-    returns (string memory)
-{
-    require(pokemonExists[pokemon1Id], "Pokemon1 doesn't exist");
-    require(pokemonExists[pokemon2Id], "Pokemon2 doesn't exist");
-    require(player1MoveIndex < 2, "Invalid move index");
-    require(player2MoveIndex < 2, "Invalid move index");
-    require(address(this).balance >= battleReward, "Insufficient contract balance");
+    function battleTurn(
+        uint256 battleId,
+        uint256 pokemon1Id,
+        uint256 pokemon2Id,
+        uint8 moveIndex1,
+        uint8 moveIndex2
+    ) external nonReentrant {
+        require(pokemonExists[pokemon1Id], "Pokemon1 does not exist");
+        require(pokemonExists[pokemon2Id], "Pokemon2 does not exist");
 
-    Pokemon storage p1 = pokemon[pokemon1Id];
-    Pokemon storage p2 = pokemon[pokemon2Id];
+        Pokemon storage p1 = pokemon[pokemon1Id];
+        Pokemon storage p2 = pokemon[pokemon2Id];
 
-    // Store original move indices for later use
-    uint8 originalP1Move = player1MoveIndex;
-    uint8 originalP2Move = player2MoveIndex;
+        require(moveIndex1 < p1.moves.length, "Invalid move index for p1");
+        require(moveIndex2 < p2.moves.length, "Invalid move index for p2");
 
-    // Check if either player is defending
-    bool p1Defending = keccak256(bytes(p1.moves[player1MoveIndex].name)) == keccak256(bytes("defend"));
-    bool p2Defending = keccak256(bytes(p2.moves[player2MoveIndex].name)) == keccak256(bytes("defend"));
+        Move memory m1 = p1.moves[moveIndex1];
+        Move memory m2 = p2.moves[moveIndex2];
 
-    if (p1Defending && p2Defending) {
-        return "both defended";
-    } else if (p1Defending) {
-        return "player1 defended";
-    } else if (p2Defending) {
-        return "player2 defended";
-    }
+        uint32 damageToP1 = 0;
+        uint32 damageToP2 = 0;
 
-    // Determine attacker (higher agility moves first)
-    Pokemon storage attacker;
-    Pokemon storage defender;
-    uint32 attackPower;
-
-    if (p1.moves[player1MoveIndex].agility >= p2.moves[player2MoveIndex].agility) {
-        attacker = p1;
-        defender = p2;
-        attackPower = p1.moves[player1MoveIndex].attackPower;
-    } else {
-        attacker = p2;
-        defender = p1;
-        attackPower = p2.moves[player2MoveIndex].attackPower;
-    }
-
-    // First attack round
-    string memory result = calculateBattlePower(attacker, defender, attackPower);
-
-    if (keccak256(bytes(result)) == keccak256(bytes("continue"))) {
-        // Swap attacker/defender for second round
-        (attacker, defender) = (defender, attacker);
-
-        // Use original move indices to get the correct attackPower
-        attackPower = (attacker.owner == p1.owner)
-            ? p1.moves[originalP1Move].attackPower
-            : p2.moves[originalP2Move].attackPower;
-
-        result = calculateBattlePower(attacker, defender, attackPower);
-    }
-
-    if (keccak256(bytes(result)) == keccak256(bytes("attacker won"))) {
-        attacker.wins++;
-        defender.losses++;
-        battleCount++;
-
-        // Distribute reward to the winner
-        // payable(attacker.owner).transfer(battleReward);
-
-        battles.push(Battle({
-            Player1: p1.owner,
-            Player2: p2.owner,
-            pokemon1Id: pokemon1Id,
-            pokemon2Id: pokemon2Id,
-            winner_owner: attacker.owner,
-            winner_mon: (attacker.owner == p1.owner) ? pokemon1Id : pokemon2Id,
-            timestamp: block.timestamp
-        }));
-
-        emit BattleCompleted(pokemon1Id, pokemon2Id, attacker.owner == p1.owner);
-        return string.concat("winner is ", attacker.name);  // ✅ Safe string concatenation
-    }
-
-    return "continue";
-}
-
-    function calculateBattlePower(
-        Pokemon storage attacker,
-        Pokemon storage defender,
-        uint32 attackPower
-    ) internal returns (string memory) {
-        defender.hp -= attackPower;
-        if (defender.hp <= 0) {
-            return "attacker won";
+        // --- Case 1: both defend ---
+        if (
+            keccak256(bytes(m1.name)) == keccak256("defend") &&
+            keccak256(bytes(m2.name)) == keccak256("defend")
+        ) {
+            emit TurnResolved(
+                battleId,
+                pokemon1Id,
+                pokemon2Id,
+                m1.name,
+                m2.name,
+                0,
+                0,
+                p1.hp,
+                p2.hp
+            );
+            return;
         }
-        return "continue";
+
+        // --- Case 2: player1 defends, player2 attacks ---
+        if (
+            keccak256(bytes(m1.name)) == keccak256("defend") &&
+            keccak256(bytes(m2.name)) != keccak256("defend")
+        ) {
+            // attack blocked
+            emit TurnResolved(
+                battleId,
+                pokemon1Id,
+                pokemon2Id,
+                m1.name,
+                m2.name,
+                0,
+                0,
+                p1.hp,
+                p2.hp
+            );
+            return;
+        }
+
+        // --- Case 3: player2 defends, player1 attacks ---
+        if (
+            keccak256(bytes(m2.name)) == keccak256("defend") &&
+            keccak256(bytes(m1.name)) != keccak256("defend")
+        ) {
+            // attack blocked
+            emit TurnResolved(
+                battleId,
+                pokemon1Id,
+                pokemon2Id,
+                m1.name,
+                m2.name,
+                0,
+                0,
+                p1.hp,
+                p2.hp
+            );
+            return;
+        }
+
+        // --- Case 4: both attack ---
+        if (
+            keccak256(bytes(m1.name)) != keccak256("defend") &&
+            keccak256(bytes(m2.name)) != keccak256("defend")
+        ) {
+            if (m1.agility > m2.agility) {
+                // p1 attacks first
+                damageToP2 = m1.attackPower;
+                p2.hp = p2.hp > m1.attackPower ? p2.hp - m1.attackPower : 0;
+
+                // if p2 survives, counterattack
+                if (p2.hp > 0) {
+                    damageToP1 = m2.attackPower;
+                    p1.hp = p1.hp > m2.attackPower ? p1.hp - m2.attackPower : 0;
+                }
+            } else {
+                // p2 attacks first
+                damageToP1 = m2.attackPower;
+                p1.hp = p1.hp > m2.attackPower ? p1.hp - m2.attackPower : 0;
+
+                // if p1 survives, counterattack
+                if (p1.hp > 0) {
+                    damageToP2 = m1.attackPower;
+                    p2.hp = p2.hp > m1.attackPower ? p2.hp - m1.attackPower : 0;
+                }
+            }
+        }
+
+        // Emit per-turn result
+        emit TurnResolved(
+            battleId,
+            pokemon1Id,
+            pokemon2Id,
+            m1.name,
+            m2.name,
+            damageToP1,
+            damageToP2,
+            p1.hp,
+            p2.hp
+        );
+
+        // --- End of turn: check win conditions ---
+        if (p1.hp == 0 && p2.hp > 0) {
+            p2.wins++;
+            p1.losses++;
+            emit BattleEnded(
+                battleId,
+                p2.owner,
+                pokemon2Id,
+                p1.owner,
+                pokemon1Id,
+                0,
+                block.timestamp
+            );
+        } else if (p2.hp == 0 && p1.hp > 0) {
+            p1.wins++;
+            p2.losses++;
+            emit BattleEnded(
+                battleId,
+                p1.owner,
+                pokemon1Id,
+                p2.owner,
+                pokemon2Id,
+                0,
+                block.timestamp
+            );
+        } else if (p1.hp == 0 && p2.hp == 0) {
+            // draw: both faint → you may want a special case
+            emit BattleEnded(
+                battleId,
+                address(0),
+                0,
+                address(0),
+                0,
+                0,
+                block.timestamp
+            );
+        }
     }
 
-    // ... (keep all other existing functions like getPokemon, getLeaderboard, etc.)
-    // Note: You'll need to update getPokemon and getPokemonWithStats since we removed attack/defense/agility from Pokemon struct
+    function getMyPokemon()
+        external
+        view
+        returns (
+            uint256 tokenId,
+            string memory name,
+            uint32 hp,
+            uint256 wins,
+            uint256 losses,
+            uint256 createdAt
+        )
+    {
+        require(
+            ownerToPokemon[msg.sender].length > 0,
+            "You do not own a Pokemon"
+        );
+        tokenId = ownerToPokemon[msg.sender][0];
+        Pokemon memory p = pokemon[tokenId];
+        return (tokenId, p.name, p.hp, p.wins, p.losses, p.createdAt);
+    }
+
+    function getAllPokemon() external view returns (Pokemon[] memory) {
+        uint256 total = _tokenIds.current();
+        Pokemon[] memory result = new Pokemon[](total);
+        for (uint256 i = 1; i <= total; i++) {
+            result[i - 1] = pokemon[i];
+        }
+        return result;
+    }
+
+    function getLeaderboard()
+        external
+        view
+        returns (
+            uint256[10] memory tokenIds,
+            string[10] memory names,
+            uint256[10] memory wins
+        )
+    {
+        uint256 total = _tokenIds.current();
+
+        // temporary arrays for sorting
+        uint256[] memory ids = new uint256[](total);
+        for (uint256 i = 0; i < total; i++) {
+            ids[i] = i + 1; // token IDs start at 1
+        }
+
+        // simple selection sort for top 10
+        for (uint256 i = 0; i < total; i++) {
+            for (uint256 j = i + 1; j < total; j++) {
+                if (pokemon[ids[j]].wins > pokemon[ids[i]].wins) {
+                    (ids[i], ids[j]) = (ids[j], ids[i]);
+                }
+            }
+        }
+
+        // take top 10
+        for (uint256 k = 0; k < 10 && k < total; k++) {
+            tokenIds[k] = ids[k];
+            names[k] = pokemon[ids[k]].name;
+            wins[k] = pokemon[ids[k]].wins;
+        }
+    }
 }
