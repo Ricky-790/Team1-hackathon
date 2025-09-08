@@ -139,7 +139,6 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
     }
 
     function battleTurn(
-        uint256 battleId,
         uint256 pokemon1Id,
         uint256 pokemon2Id,
         uint8 moveIndex1,
@@ -147,6 +146,7 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
     ) external nonReentrant {
         require(pokemonExists[pokemon1Id], "Pokemon1 does not exist");
         require(pokemonExists[pokemon2Id], "Pokemon2 does not exist");
+        uint256 battleId = battleCount++;
 
         Pokemon storage p1 = pokemon[pokemon1Id];
         Pokemon storage p2 = pokemon[pokemon2Id];
@@ -273,7 +273,11 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
                 0,
                 block.timestamp
             );
-        } else if (p2.hp == 0 && p1.hp > 0) {
+            address player1 = ownerOf(pokemon1Id);
+            address player2 = ownerOf(pokemon2Id);
+            battleCount++;
+            battles.push(Battle(player1, player2, pokemon1Id, pokemon2Id, player2, pokemon2Id, block.timestamp));
+    }else if (p2.hp == 0 && p1.hp > 0) {
             p1.wins++;
             p2.losses++;
             emit BattleEnded(
@@ -285,6 +289,9 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
                 0,
                 block.timestamp
             );
+            address player1 = ownerOf(pokemon1Id);
+            address player2 = ownerOf(pokemon2Id);
+            battles.push(Battle(player1, player2, pokemon1Id, pokemon2Id, player1, pokemon1Id, block.timestamp));
         } else if (p1.hp == 0 && p2.hp == 0) {
             // draw: both faint → you may want a special case
             emit BattleEnded(
@@ -296,9 +303,38 @@ contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
                 0,
                 block.timestamp
             );
+            address player1 = ownerOf(pokemon1Id);
+            address player2 = ownerOf(pokemon2Id);
+            battles.push(Battle(player1, player2, pokemon1Id, pokemon2Id, player2, pokemon2Id, block.timestamp));
+            
         }
     }
 
+    function getPokemon(uint256 pokemonId)
+    public
+    view
+    returns (
+        uint32 hp,
+        string memory name,
+        address owner,
+        uint256 wins,
+        uint256 losses,
+        uint256 createdAt,
+        Move[5] memory moves
+    )
+{
+    require(pokemonExists[pokemonId], "Pokemon does not exist");
+    Pokemon storage p = pokemon[pokemonId];
+    return (
+        p.hp,
+        p.name,
+        p.owner,
+        p.wins,
+        p.losses,
+        p.createdAt,
+        p.moves
+    );
+}
     function getMyPokemon()
         external
         view
