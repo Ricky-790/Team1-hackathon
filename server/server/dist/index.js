@@ -15,6 +15,7 @@ const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: { origin: "*" },
 });
+console.log("ac");
 // --- REST route: Create a new battle ---
 app.get("/battle/create", (req, res) => {
     const battleId = (0, uuid_1.v4)(); // unique battle room
