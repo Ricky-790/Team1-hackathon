@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/access/Ownable.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/security/ReentrancyGuard.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/security/Pausable.sol";
 
 contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
     using Strings for uint256;
@@ -36,6 +36,9 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
     Battle[] public battles;
 
     uint256 public creationFee = 0.01 ether;
+    // Add these state variables near the top (after `creationFee`)
+    uint256 public battleReward = 0.005 ether; // Example default value
+    uint256 public battleCount; // Tracks total battles
 
     event PokemonCreated(
         uint256 indexed tokenId,
@@ -69,12 +72,11 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         uint256 newTokenId = totalSupply() + 1;
         _safeMint(msg.sender, newTokenId);
 
-        // Copy moves from memory to storage
-        Move[] storage moveList;
-        for (uint i = 0; i < _moves.length; i++) {
-            moveList.push(_moves[i]);
-        }
-
+        // ✅ Fix: Initialize moves in memory first, then assign to storage
+    Move[] memory moveList = new Move[](_moves.length);
+    for (uint i = 0; i < _moves.length; i++) {
+        moveList[i] = _moves[i];
+    }
         pokemons[newTokenId] = Pokemon({
             name: _name,
             hp: 100,
@@ -213,7 +215,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         uint256 _tokenId
     ) external view returns (string memory name, uint32 hp, address owner) {
         require(_exists(_tokenId), "Pokemon doesn't exist");
-        Pokemon storage p = pokemon[_tokenId];
+        Pokemon storage p = pokemons[_tokenId];
         return (p.name, p.hp, ownerOf(_tokenId));
     }
 
@@ -235,7 +237,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         )
     {
         require(_exists(_tokenId), "Pokemon doesn't exist");
-        Pokemon storage p = pokemon[_tokenId];
+        Pokemon storage p = pokemons[_tokenId];
         return (p.name, p.hp, ownerOf(_tokenId), p.wins, p.losses, p.createdAt);
     }
 
@@ -243,7 +245,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         uint256 _tokenId
     ) external view returns (Move[] memory) {
         require(_exists(_tokenId), "Pokemon doesn't exist");
-        Pokemon storage p = pokemon[_tokenId];
+        Pokemon storage p = pokemons[_tokenId];
         uint256 len = p.moves.length;
         Move[] memory out = new Move[](len);
         for (uint256 i = 0; i < len; i++) {
@@ -266,23 +268,13 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
      * @dev Get all existing Pokemon IDs
      */
     function getAllPokemon() external view returns (uint256[] memory) {
-        uint256 total = _tokenIds.current();
-        // First count how many exist
-        uint256 count = 0;
-        for (uint256 i = 1; i <= total; i++) {
-            if (_exists(i)) count++;
-        }
-
-        uint256[] memory result = new uint256[](count);
-        uint256 idx = 0;
-        for (uint256 i = 1; i <= total; i++) {
-            if (_exists(i)) {
-                result[idx++] = i;
-            }
-        }
-        return result;
+    uint256 total = totalSupply();
+    uint256[] memory result = new uint256[](total);
+    for (uint256 i = 0; i < total; i++) {
+        result[i] = tokenByIndex(i); // ✅ Fixed
     }
-
+    return result;
+}
     /**
      * @dev Get battle history
      * @param _start Start index
@@ -295,7 +287,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         uint256 total = battles.length;
         if (_start >= total) {
             // return empty array
-            return new Battle;
+            return new Battle[](0);
         }
 
         uint256 end = _start + _count;
@@ -312,14 +304,14 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
      * @dev Get Pokemon leaderboard by wins
      * @param _count Number of top Pokemon to return
      */
-    function getLeaderboard(
-        uint256 _count
-    )
-        external
-        view
-        returns (uint256[] memory pokemonIds, uint256[] memory wins)
-    {
-        uint256 total = _tokenIds.current();
+function getLeaderboard(uint256 _count)
+    external
+    view
+    returns (uint256[] memory pokemonIds, uint256[] memory wins)
+{
+    uint256 total = totalSupply(); // ✅ Fixed
+    require(total > 0, "No pokemon exist");
+    // ... rest of the function
 
         // Build arrays only for existing tokens
         uint256 existingCount = 0;
@@ -337,7 +329,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         for (uint256 i = 1; i <= total; i++) {
             if (!_exists(i)) continue;
             ids[idx] = i;
-            winCounts[idx] = pokemon[i].wins;
+            winCounts[idx] = pokemons[i].wins;
             idx++;
         }
 
@@ -379,8 +371,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         super._beforeTokenTransfer(from, to, tokenId, batchSize);
 
         if (from != address(0) && to != address(0)) {
-            // Update Pokemon owner
-            pokemon[tokenId].owner = to;
+          
 
             // Remove from old owner's list
             uint256[] storage fromPokemon = ownerToPokemon[from];
@@ -447,7 +438,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
         )
     {
         return (
-            _tokenIds.current(),
+            totalSupply(),
             battleCount,
             address(this).balance,
             creationFee,
@@ -458,9 +449,7 @@ contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
     /**
      * @dev Get total supply of Pokemon
      */
-    function totalSupply() external view returns (uint256) {
-        return _tokenIds.current();
-    }
+    
 
     /**
      * @dev Receive function to accept ETH
