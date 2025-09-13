@@ -1,24 +1,30 @@
 // src/server.ts
 import express from "express";
+import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { v4 as uuidv4 } from "uuid";
 
 const app = express();
+app.use(cors());
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: "*" },
 });
-
 // --- REST route: Create a new battle ---
-app.post("/battle/create", (req, res) => {
+app.get("/battle/create", (req, res) => {
   const battleId = uuidv4(); // unique battle room
+  console.log(battleId);
   res.json({ battleId });
 });
 
 // --- Socket.io: Manage battle rooms ---
 io.on("connection", (socket) => {
   console.log("Player connected:", socket.id);
+  socket.on("joinGame", ({ battleId: battleId }) => {
+    socket.join("game-" + battleId);
+    console.log(`Socket ${socket.id} joined room game-${battleId}`);
+  });
 
   socket.on("join-battle-room", (battleId: string) => {
     socket.join(battleId);
