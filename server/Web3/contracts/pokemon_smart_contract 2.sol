@@ -1,401 +1,548 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/access/Ownable.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/security/ReentrancyGuard.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/security/Pausable.sol";
 
-contract PokemonGame is ERC721, Ownable, ReentrancyGuard {
-    using Counters for Counters.Counter;
-    Counters.Counter private _tokenIds;
+contract PokemonGame is ERC721Enumerable, Ownable, ReentrancyGuard, Pausable {
+    using Strings for uint256;
 
     struct Move {
         string name;
-        uint32 attackPower;
-        uint32 agility;
+        uint32 attackPower; // Damage dealt
+        uint32 agility; // Used to determine attack order
     }
 
-    struct Pokemon {
-        uint32 hp;
-        string name;
-        Move[5] moves; // Fixed-size array for gas efficiency
-        address owner;
-        uint256 wins;
-        uint256 losses;
-        uint256 createdAt;
-    }
+struct Pokemon {
+    string name;
+    uint32 hp;
+    Move[] moves;
+    uint256 wins;
+    uint256 losses;
+    uint32 level;        // Pokemon’s level
+    uint64 xp;           // Experience points
+    uint64 createdAt;
+    uint64 lastBattleAt;
+    
+}
 
-    struct Battle {
-        address Player1;
-        address Player2;
-        uint256 pokemon1Id;
-        uint256 pokemon2Id;
-        address winner_owner;
-        uint256 winner_mon;
-        uint256 timestamp;
-    }
+struct Battle {
+    uint256 pokemon1Id;
+    uint256 pokemon2Id;
+    address winner;  
+    address loser;     // Keep address too if needed for rewards
+    uint32 xpAwarded;     // XP given to the winner
+    uint256 timestamp;
+}
 
-    // Mappings
-    mapping(uint256 => Pokemon) public pokemon;
+
+    mapping(uint256 => Pokemon) public pokemons;
     mapping(address => uint256[]) public ownerToPokemon;
-    mapping(uint256 => bool) public pokemonExists;
-
-    // Battle tracking
     Battle[] public battles;
-    uint256 public battleCount;
 
-    // Game economics
     uint256 public creationFee = 0.01 ether;
-    uint256 public battleReward = 0.005 ether;
+    // Add these state variables near the top (after `creationFee`)
+    uint256 public battleReward = 0.005 ether; // Example default value
+    uint256 public battleCount; // Tracks total battles
 
-    // Events
-    // event PokemonCreated(uint256 indexed tokenId, string name, address indexed owner);
-    // event BattleCompleted(uint256 indexed attackerId, uint256 indexed defenderId, bool attackerWon);
-    // event RewardClaimed(address indexed player, uint256 amount);
     event PokemonCreated(
         uint256 indexed tokenId,
-        address indexed owner,
-        string name
+        string name,
+        address indexed owner
     );
-
-    event BattleStarted(
+    event BattleCompleted(
         uint256 indexed battleId,
-        address indexed player1,
-        uint256 indexed pokemon1Id,
-        address player2,
-        uint256 pokemon2Id,
-        uint256 timestamp
+        address indexed winner,
+        uint256 winnerPokemonId
     );
 
-    event TurnResolved(
-        uint256 indexed battleId,
-        uint256 indexed pokemon1Id,
-        uint256 indexed pokemon2Id,
-        string move1,
-        string move2,
-        uint32 damageToP1,
-        uint32 damageToP2,
-        uint32 hp1After,
-        uint32 hp2After
-    );
+    constructor() ERC721("Pokemon Game", "POKEMON") {}
 
-    event BattleEnded(
-        uint256 indexed battleId,
-        address indexed winnerOwner,
-        uint256 indexed winnerPokemonId,
-        address loserOwner,
-        uint256 loserPokemonId,
-        uint8 totalTurns,
-        uint256 timestamp
-    );
-
-    constructor()
-        ERC721("Pokemon Game", "POKEMON")
-        Ownable(msg.sender)
-        ReentrancyGuard()
-    {}
+    modifier onlyExistingPokemon(uint256 tokenId) {
+        require(_exists(tokenId), "Pokemon does not exist");
+        _;
+    }
 
     function createPokemon(
         string memory _name,
-        string memory _move1,
-        uint32 _move1atk,
-        uint32 _move1agi,
-        string memory _move2,
-        uint32 _move2atk,
-        uint32 _move2agi
-    ) external payable nonReentrant returns (uint256) {
+        Move[] memory _moves
+    ) external payable nonReentrant whenNotPaused returns (uint256) {
         require(msg.value >= creationFee, "Insufficient creation fee");
         require(
             bytes(_name).length > 0 && bytes(_name).length <= 20,
             "Invalid name length"
         );
+        require(_moves.length > 0, "Pokemon must have at least one move");
 
-        _tokenIds.increment();
-        uint256 newTokenId = _tokenIds.current();
+        uint256 newTokenId = totalSupply() + 1;
         _safeMint(msg.sender, newTokenId);
 
-        pokemon[newTokenId] = Pokemon({
-            hp: 10,
+        // ✅ Fix: Initialize moves in memory first, then assign to storage
+    Move[] memory moveList = new Move[](_moves.length);
+    for (uint i = 0; i < _moves.length; i++) {
+        moveList[i] = _moves[i];
+    }
+       pokemons[newTokenId] = Pokemon({
             name: _name,
-            moves: [
-                Move("defend", 0, 100),
-                Move(_move1, _move1atk, _move1agi),
-                Move(_move2, _move2atk, _move2agi),
-                Move("", 0, 0),
-                Move("", 0, 0)
-            ],
-            owner: msg.sender,
+            hp: 100,
+            moves: moveList,
             wins: 0,
             losses: 0,
-            createdAt: block.timestamp
+            level: 1,                       // new field
+            xp: 0,                          // new field
+            createdAt: uint64(block.timestamp),
+            lastBattleAt: uint64(block.timestamp) // initialize to createdAt
         });
 
         ownerToPokemon[msg.sender].push(newTokenId);
-        pokemonExists[newTokenId] = true;
 
-        emit PokemonCreated(newTokenId, msg.sender, _name);
+        emit PokemonCreated(newTokenId, _name, msg.sender);
         return newTokenId;
     }
 
-    function battleTurn(
+    /**
+     * @dev Battle between two Pokemon using chosen move indexes
+     */
+    function battle(
         uint256 pokemon1Id,
         uint256 pokemon2Id,
-        uint8 moveIndex1,
-        uint8 moveIndex2
-    ) external nonReentrant {
-        require(pokemonExists[pokemon1Id], "Pokemon1 does not exist");
-        require(pokemonExists[pokemon2Id], "Pokemon2 does not exist");
-        uint256 battleId = battleCount++;
+        uint8 move1Index,
+        uint8 move2Index
+    )
+        external
+        nonReentrant
+        whenNotPaused
+        onlyExistingPokemon(pokemon1Id)
+        onlyExistingPokemon(pokemon2Id)
+        returns (string memory)
+    {
+        require(ownerOf(pokemon1Id) == msg.sender, "You must own Pokemon1");
+        require(pokemon1Id != pokemon2Id, "Cannot battle the same Pokemon");
 
-        Pokemon storage p1 = pokemon[pokemon1Id];
-        Pokemon storage p2 = pokemon[pokemon2Id];
+        Pokemon storage p1 = pokemons[pokemon1Id];
+        Pokemon storage p2 = pokemons[pokemon2Id];
 
-        require(moveIndex1 < p1.moves.length, "Invalid move index for p1");
-        require(moveIndex2 < p2.moves.length, "Invalid move index for p2");
+        require(move1Index < p1.moves.length, "Invalid move for Pokemon1");
+        require(move2Index < p2.moves.length, "Invalid move for Pokemon2");
 
-        Move memory m1 = p1.moves[moveIndex1];
-        Move memory m2 = p2.moves[moveIndex2];
+        Move memory m1 = p1.moves[move1Index];
+        Move memory m2 = p2.moves[move2Index];
 
-        uint32 damageToP1 = 0;
-        uint32 damageToP2 = 0;
+        // Determine attack order based on agility
+        bool p1AttacksFirst = (m1.agility >= m2.agility);
 
-        // --- Case 1: both defend ---
-        if (
-            keccak256(bytes(m1.name)) == keccak256("defend") &&
-            keccak256(bytes(m2.name)) == keccak256("defend")
-        ) {
-            emit TurnResolved(
-                battleId,
-                pokemon1Id,
-                pokemon2Id,
-                m1.name,
-                m2.name,
-                0,
-                0,
-                p1.hp,
-                p2.hp
-            );
-            return;
+        string memory battleResult;
+        if (p1AttacksFirst) {
+            battleResult = _attackSequence(p1, p2, m1, m2, true);
+        } else {
+            battleResult = _attackSequence(p2, p1, m2, m1, false);
         }
 
-        // --- Case 2: player1 defends, player2 attacks ---
-        if (
-            keccak256(bytes(m1.name)) == keccak256("defend") &&
-            keccak256(bytes(m2.name)) != keccak256("defend")
+        // Record battle result
+        address winnerAddr;
+        uint256 winnerId;
+        if (keccak256(bytes(battleResult)) == keccak256("Pokemon1 wins")) {
+            winnerAddr = ownerOf(pokemon1Id);
+            winnerId = pokemon1Id;
+        } else if (
+            keccak256(bytes(battleResult)) == keccak256("Pokemon2 wins")
         ) {
-            // attack blocked
-            emit TurnResolved(
-                battleId,
-                pokemon1Id,
-                pokemon2Id,
-                m1.name,
-                m2.name,
-                0,
-                0,
-                p1.hp,
-                p2.hp
-            );
-            return;
+            winnerAddr = ownerOf(pokemon2Id);
+            winnerId = pokemon2Id;
         }
+        address loserAddr;
+if (keccak256(bytes(battleResult)) == keccak256("Pokemon1 wins")) {
+    winnerAddr = ownerOf(pokemon1Id);
+    loserAddr = ownerOf(pokemon2Id); // <-- Add this
+} else if (keccak256(bytes(battleResult)) == keccak256("Pokemon2 wins")) {
+    winnerAddr = ownerOf(pokemon2Id);
+    loserAddr = ownerOf(pokemon1Id); // <-- Add this
+}
 
-        // --- Case 3: player2 defends, player1 attacks ---
-        if (
-            keccak256(bytes(m2.name)) == keccak256("defend") &&
-            keccak256(bytes(m1.name)) != keccak256("defend")
-        ) {
-            // attack blocked
-            emit TurnResolved(
-                battleId,
-                pokemon1Id,
-                pokemon2Id,
-                m1.name,
-                m2.name,
-                0,
-                0,
-                p1.hp,
-                p2.hp
-            );
-            return;
-        }
+           battles.push(
+        Battle({
+            pokemon1Id: pokemon1Id,
+            pokemon2Id: pokemon2Id,
+            winner: winnerAddr,
+            loser: loserAddr,
+            xpAwarded: 50,
+            timestamp: block.timestamp
+        })
+    );
 
-        // --- Case 4: both attack ---
-        if (
-            keccak256(bytes(m1.name)) != keccak256("defend") &&
-            keccak256(bytes(m2.name)) != keccak256("defend")
-        ) {
-            if (m1.agility > m2.agility) {
-                // p1 attacks first
-                damageToP2 = m1.attackPower;
-                p2.hp = p2.hp > m1.attackPower ? p2.hp - m1.attackPower : 0;
+        emit BattleCompleted(battles.length - 1, winnerAddr, winnerId);
 
-                // if p2 survives, counterattack
-                if (p2.hp > 0) {
-                    damageToP1 = m2.attackPower;
-                    p1.hp = p1.hp > m2.attackPower ? p1.hp - m2.attackPower : 0;
-                }
-            } else {
-                // p2 attacks first
-                damageToP1 = m2.attackPower;
-                p1.hp = p1.hp > m2.attackPower ? p1.hp - m2.attackPower : 0;
+        return battleResult;
+    }
+//to be added functions
+function updateRecords(
+    uint256 pokemon1Id,
+    uint256 pokemon2Id,
+    uint256 winnerId
+) external {
+    uint256 loserId = (winnerId == pokemon1Id) ? pokemon2Id : pokemon1Id;
 
-                // if p1 survives, counterattack
-                if (p1.hp > 0) {
-                    damageToP2 = m1.attackPower;
-                    p2.hp = p2.hp > m1.attackPower ? p2.hp - m1.attackPower : 0;
-                }
+    // Update win/loss
+    pokemons[winnerId].wins += 1;
+    pokemons[loserId].losses += 1;
+
+    // Distribute rewards (XP & Level)
+    distributeRewards(winnerId, loserId);
+
+    // Push battle record
+    battles.push(
+        Battle({
+            pokemon1Id: pokemon1Id,
+            pokemon2Id: pokemon2Id,
+            winner: ownerOf(winnerId),
+            loser: ownerOf(loserId),
+            xpAwarded: 50,
+            timestamp: block.timestamp
+        })
+    );
+
+    // Update last battle times
+    pokemons[pokemon1Id].lastBattleAt = uint64(block.timestamp);
+    pokemons[pokemon2Id].lastBattleAt = uint64(block.timestamp);
+}
+
+
+// battles.push()
+    function distributeRewards(
+    uint256 winnerId,
+    uint256 loserId
+) internal {
+    // Winner gets 50 XP
+    _handleXpAndLevel(winnerId, 50);
+
+    // Loser gets 10 XP
+    _handleXpAndLevel(loserId, 10);
+}
+
+
+    function _attackSequence(
+        Pokemon storage first,
+        Pokemon storage second,
+        Move memory firstMove,
+        Move memory secondMove,
+        bool firstIsP1
+    ) internal returns (string memory) {
+        bool firstDefends = keccak256(bytes(firstMove.name)) ==
+            keccak256("Defend");
+        bool secondDefends = keccak256(bytes(secondMove.name)) ==
+            keccak256("Defend");
+
+        // First attack phase
+        if (!secondDefends && !firstDefends) {
+            if (second.hp <= firstMove.attackPower) {
+                _recordWinLoss(first, second);
+                return firstIsP1 ? "Pokemon1 wins" : "Pokemon2 wins";
             }
+            second.hp -= firstMove.attackPower;
         }
 
-        // Emit per-turn result
-        emit TurnResolved(
-            battleId,
-            pokemon1Id,
-            pokemon2Id,
-            m1.name,
-            m2.name,
-            damageToP1,
-            damageToP2,
-            p1.hp,
-            p2.hp
-        );
-
-        // --- End of turn: check win conditions ---
-        if (p1.hp == 0 && p2.hp > 0) {
-            p2.wins++;
-            p1.losses++;
-            emit BattleEnded(
-                battleId,
-                p2.owner,
-                pokemon2Id,
-                p1.owner,
-                pokemon1Id,
-                0,
-                block.timestamp
-            );
-            address player1 = ownerOf(pokemon1Id);
-            address player2 = ownerOf(pokemon2Id);
-            battleCount++;
-            battles.push(Battle(player1, player2, pokemon1Id, pokemon2Id, player2, pokemon2Id, block.timestamp));
-    }else if (p2.hp == 0 && p1.hp > 0) {
-            p1.wins++;
-            p2.losses++;
-            emit BattleEnded(
-                battleId,
-                p1.owner,
-                pokemon1Id,
-                p2.owner,
-                pokemon2Id,
-                0,
-                block.timestamp
-            );
-            address player1 = ownerOf(pokemon1Id);
-            address player2 = ownerOf(pokemon2Id);
-            battles.push(Battle(player1, player2, pokemon1Id, pokemon2Id, player1, pokemon1Id, block.timestamp));
-        } else if (p1.hp == 0 && p2.hp == 0) {
-            // draw: both faint → you may want a special case
-            emit BattleEnded(
-                battleId,
-                address(0),
-                0,
-                address(0),
-                0,
-                0,
-                block.timestamp
-            );
-            address player1 = ownerOf(pokemon1Id);
-            address player2 = ownerOf(pokemon2Id);
-            battles.push(Battle(player1, player2, pokemon1Id, pokemon2Id, player2, pokemon2Id, block.timestamp));
-            
+        // Counter attack phase
+        if (!firstDefends && !secondDefends) {
+            if (first.hp <= secondMove.attackPower) {
+                _recordWinLoss(second, first);
+                return firstIsP1 ? "Pokemon2 wins" : "Pokemon1 wins";
+            }
+            first.hp -= secondMove.attackPower;
         }
+
+        return "Battle continues"; // Both defended or survived → next round
     }
 
-    function getPokemon(uint256 pokemonId)
-    public
-    view
-    returns (
-        uint32 hp,
-        string memory name,
-        address owner,
-        uint256 wins,
-        uint256 losses,
-        uint256 createdAt,
-        Move[5] memory moves
+    function _recordWinLoss(
+        Pokemon storage winner,
+        Pokemon storage loser
+    ) internal {
+        winner.wins++;
+        loser.losses++;
+    }
+
+    function pauseGame() external onlyOwner {
+        _pause();
+    }
+
+    function unpauseGame() external onlyOwner {
+        _unpause();
+    }
+
+    /**
+     * @dev Get Pokemon details
+     * @param _tokenId Pokemon ID
+     */
+    // Return basic info (excluding moves to keep this cheap)
+    function getPokemon(
+        uint256 _tokenId
+    ) external view returns (string memory name, uint32 hp, address owner) {
+        require(_exists(_tokenId), "Pokemon doesn't exist");
+        Pokemon storage p = pokemons[_tokenId];
+        return (p.name, p.hp, ownerOf(_tokenId));
+    }
+
+    /**
+     * @dev Get Pokemon with battle stats (excluding moves)
+     */
+    function getPokemonWithStats(
+        uint256 _tokenId
     )
-{
-    require(pokemonExists[pokemonId], "Pokemon does not exist");
-    Pokemon storage p = pokemon[pokemonId];
-    return (
-        p.hp,
-        p.name,
-        p.owner,
-        p.wins,
-        p.losses,
-        p.createdAt,
-        p.moves
-    );
-}
-    function getMyPokemon()
-        external
+        public
         view
         returns (
-            uint256 tokenId,
             string memory name,
             uint32 hp,
+            address owner,
             uint256 wins,
             uint256 losses,
-            uint256 createdAt
+            uint64 createdAt,
+            uint256 xp,
+            uint256 level
         )
     {
-        require(
-            ownerToPokemon[msg.sender].length > 0,
-            "You do not own a Pokemon"
-        );
-        tokenId = ownerToPokemon[msg.sender][0];
-        Pokemon memory p = pokemon[tokenId];
-        return (tokenId, p.name, p.hp, p.wins, p.losses, p.createdAt);
+        require(_exists(_tokenId), "Pokemon doesn't exist");
+        Pokemon storage p = pokemons[_tokenId];
+        return (p.name, p.hp, ownerOf(_tokenId), p.wins, p.losses, p.createdAt, p.xp, p.level);
     }
 
-    function getAllPokemon() external view returns (Pokemon[] memory) {
-        uint256 total = _tokenIds.current();
-        Pokemon[] memory result = new Pokemon[](total);
-        for (uint256 i = 1; i <= total; i++) {
-            result[i - 1] = pokemon[i];
+    function getPokemonMoves(
+        uint256 _tokenId
+    ) external view returns (Move[] memory) {
+        require(_exists(_tokenId), "Pokemon doesn't exist");
+        Pokemon storage p = pokemons[_tokenId];
+        uint256 len = p.moves.length;
+        Move[] memory out = new Move[](len);
+        for (uint256 i = 0; i < len; i++) {
+            out[i] = p.moves[i];
+        }
+        return out;
+    }
+
+    /**
+     * @dev Get all Pokemon owned by an address
+     * @param _owner Owner address
+     */
+    function getPokemonsByOwner(
+        address _owner
+    ) external view returns (uint256[] memory) {
+        return ownerToPokemon[_owner];
+    }
+
+    /**
+     * @dev Get all existing Pokemon IDs
+     */
+    function getAllPokemon() external view returns (uint256[] memory) {
+    uint256 total = totalSupply();
+    uint256[] memory result = new uint256[](total);
+    for (uint256 i = 0; i < total; i++) {
+        result[i] = tokenByIndex(i); // ✅ Fixed
+    }
+    return result;
+}
+    /**
+     * @dev Get battle history
+     * @param _start Start index
+     * @param _count Number of battles to return
+     */
+    function getBattleHistory(
+        uint256 _start,
+        uint256 _count
+    ) external view returns (Battle[] memory) {
+        uint256 total = battles.length;
+        if (_start >= total) {
+            // return empty array
+            return new Battle[](0);
+        }
+
+        uint256 end = _start + _count;
+        if (end > total) end = total;
+        uint256 len = end - _start;
+        Battle[] memory result = new Battle[](len);
+        for (uint256 i = 0; i < len; i++) {
+            result[i] = battles[_start + i];
         }
         return result;
     }
 
-    function getLeaderboard()
+    /**
+     * @dev Get Pokemon leaderboard by wins
+     * @param _count Number of top Pokemon to return
+     */
+function getLeaderboard(uint256 _count)
+    external
+    view
+    returns (uint256[] memory pokemonIds, uint256[] memory wins)
+{
+    uint256 total = totalSupply(); // ✅ Fixed
+    require(total > 0, "No pokemon exist");
+    // ... rest of the function
+
+        // Build arrays only for existing tokens
+        uint256 existingCount = 0;
+        for (uint256 i = 1; i <= total; i++) {
+            if (_exists(i)) existingCount++;
+        }
+
+        require(existingCount > 0, "No pokemon exist");
+        if (_count == 0 || _count > existingCount) _count = existingCount;
+
+        // Populate arrays
+        uint256[] memory ids = new uint256[](existingCount);
+        uint256[] memory winCounts = new uint256[](existingCount);
+        uint256 idx = 0;
+        for (uint256 i = 1; i <= total; i++) {
+            if (!_exists(i)) continue;
+            ids[idx] = i;
+            winCounts[idx] = pokemons[i].wins;
+            idx++;
+        }
+
+        // Simple selection sort for top _count (better than full bubble sort for top-k)
+        for (uint256 i = 0; i < _count; i++) {
+            uint256 bestIdx = i;
+            for (uint256 j = i + 1; j < existingCount; j++) {
+                if (winCounts[j] > winCounts[bestIdx]) {
+                    bestIdx = j;
+                }
+            }
+            // Swap into position i
+            (winCounts[i], winCounts[bestIdx]) = (
+                winCounts[bestIdx],
+                winCounts[i]
+            );
+            (ids[i], ids[bestIdx]) = (ids[bestIdx], ids[i]);
+        }
+
+        // Prepare output arrays
+        pokemonIds = new uint256[](_count);
+        wins = new uint256[](_count);
+        for (uint256 i = 0; i < _count; i++) {
+            pokemonIds[i] = ids[i];
+            wins[i] = winCounts[i];
+        }
+        return (pokemonIds, wins);
+    }
+
+    /**
+     * @dev Transfer ownership of Pokemon (override to update our mapping)
+     */
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 batchSize
+    ) internal override {
+        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+
+        if (from != address(0) && to != address(0)) {
+          
+
+            // Remove from old owner's list
+            uint256[] storage fromPokemon = ownerToPokemon[from];
+            for (uint256 i = 0; i < fromPokemon.length; i++) {
+                if (fromPokemon[i] == tokenId) {
+                    fromPokemon[i] = fromPokemon[fromPokemon.length - 1];
+                    fromPokemon.pop();
+                    break;
+                }
+            }
+
+            // Add to new owner's list
+            ownerToPokemon[to].push(tokenId);
+        }
+    }
+
+    /**
+     * @dev Update creation fee (owner only)
+     */
+    function setCreationFee(uint256 _newFee) external onlyOwner {
+        creationFee = _newFee;
+    }
+
+    /**
+     * @dev Update battle reward (owner only)
+     */
+    function setBattleReward(uint256 _newReward) external onlyOwner {
+        battleReward = _newReward;
+    }
+
+    /**
+     * @dev Withdraw contract balance (owner only)
+     */
+    function withdraw() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+
+        payable(owner()).transfer(balance);
+    }
+
+    /**
+     * @dev Emergency withdraw for specific amount (owner only)
+     */
+    function withdrawAmount(uint256 _amount) external onlyOwner {
+        require(
+            _amount <= address(this).balance,
+            "Insufficient contract balance"
+        );
+        payable(owner()).transfer(_amount);
+    }
+
+    /**
+     * @dev Get contract statistics
+     */
+    function getContractStats()
         external
         view
         returns (
-            uint256[10] memory tokenIds,
-            string[10] memory names,
-            uint256[10] memory wins
+            uint256 totalPokemon,
+            uint256 totalBattles,
+            uint256 contractBalance,
+            uint256 creationCost,
+            uint256 winReward
         )
     {
-        uint256 total = _tokenIds.current();
-
-        // temporary arrays for sorting
-        uint256[] memory ids = new uint256[](total);
-        for (uint256 i = 0; i < total; i++) {
-            ids[i] = i + 1; // token IDs start at 1
-        }
-
-        // simple selection sort for top 10
-        for (uint256 i = 0; i < total; i++) {
-            for (uint256 j = i + 1; j < total; j++) {
-                if (pokemon[ids[j]].wins > pokemon[ids[i]].wins) {
-                    (ids[i], ids[j]) = (ids[j], ids[i]);
-                }
-            }
-        }
-
-        // take top 10
-        for (uint256 k = 0; k < 10 && k < total; k++) {
-            tokenIds[k] = ids[k];
-            names[k] = pokemon[ids[k]].name;
-            wins[k] = pokemon[ids[k]].wins;
-        }
+        return (
+            totalSupply(),
+            battleCount,
+            address(this).balance,
+            creationFee,
+            battleReward
+        );
     }
+
+    /**
+ * @dev Handles XP gain and level-up logic
+ * @param _pokemonId The Pokémon receiving XP
+ * @param _xpAmount XP to add
+ */
+function _handleXpAndLevel(uint256 _pokemonId, uint64 _xpAmount) internal {
+    Pokemon storage p = pokemons[_pokemonId];
+    p.xp += _xpAmount;
+
+    // Example: Level up every 100 XP
+    uint32 newLevel = uint32(p.xp / 100) + 1;
+    if (newLevel > p.level) {
+        p.level = newLevel;
+        // Optional: Increase HP on level-up (e.g., +10 HP per level)
+        p.hp += 10 * (newLevel - p.level);
+    }
+}
+
+  /***@dev Get total supply of Pokemon
+     */
+    
+
+    /**
+     * @dev Receive function to accept ETH
+     */
+    // receive() external payable {}
+
+    /**
+     * @dev Fallback function
+     */
+    // fallback() external payable {}
+   
 }
