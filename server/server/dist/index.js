@@ -88,12 +88,20 @@ io.on("connection", (socket) => {
             };
             battles.set(battleId, newBattle);
             console.log(`Player 1 (${playerAddress}) joined battle ${battleId}`);
+            try {
+                console.log("Emitting player joined");
+                socket.to("game-" + battleId).emit("player joined", 1);
+            }
+            catch (e) {
+                console.log(e);
+            }
             // Notify the player they're waiting for opponent
-            socket.emit("waitingForOpponent", {
+            socket.broadcast.to("game-" + battleId).emit("waitingForOpponent", {
                 battleId,
                 playerNumber: 1,
                 message: "Waiting for another player to join...",
             });
+            console.log("Waiting for opp");
         }
         else {
             // Battle exists - this is the second player
